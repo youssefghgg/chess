@@ -12,15 +12,27 @@ class ChessPiece:
 
 
 class ChessGame:
-    def __init__(self, root):
+    def __init__(self, root, main_menu):
         self.root = root
+        self.main_menu = main_menu
         self.root.title("Chess Game")
-        self.root.geometry("800x800")  # Make sure window is large enough
-        self.root.configure(bg='#2C3E50')  # Match main menu style
 
-        # Create a frame for the game content
+        # Initialize piece images dictionary
+        self.piece_images = {
+            "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
+            "white_bishop": "♗", "white_queen": "♕", "white_king": "♔",
+            "black_pawn": "♟", "black_rook": "♜", "black_knight": "♞",
+            "black_bishop": "♝", "black_queen": "♛", "black_king": "♚"
+        }
+
+        # Create a frame for the game content (only once)
         self.game_container = tk.Frame(self.root, bg='#2C3E50')
         self.game_container.pack(expand=True, fill='both', padx=20, pady=20)
+
+        # Initialize game components
+        self.selected_piece = None
+        self.current_player = "white"
+        self.last_move = None
 
         # Add a return to menu button
         self.menu_button = tk.Button(self.game_container,
@@ -35,11 +47,6 @@ class ChessGame:
                                      cursor='hand2')
         self.menu_button.pack(pady=(0, 10))
 
-        # Initialize game components
-        self.selected_piece = None
-        self.current_player = "white"
-        self.last_move = None
-
         # Create and pack the turn indicator
         self.turn_label = tk.Label(self.game_container,
                                    text="White's turn",
@@ -47,17 +54,6 @@ class ChessGame:
                                    bg='#2C3E50',
                                    fg='white')
         self.turn_label.pack(pady=10)
-
-        self.piece_images = {
-            "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
-            "white_bishop": "♗", "white_queen": "♕", "white_king": "♔",
-            "black_pawn": "♟", "black_rook": "♜", "black_knight": "♞",
-            "black_bishop": "♝", "black_queen": "♛", "black_king": "♚"
-        }
-
-        # Create a frame for the game content
-        self.game_container = tk.Frame(self.root, bg='#2C3E50')
-        self.game_container.pack(expand=True, fill='both', padx=20, pady=20)
 
         # Create the chess board
         self.board_size = 8
@@ -102,7 +98,8 @@ class ChessGame:
             self.board[7][col] = ChessPiece("white", piece_name)  # Changed to white
 
     def return_to_menu(self):
-        self.root.destroy()
+        self.root.destroy()  # Close game window
+        self.main_menu.root.deiconify()  # Show main menu
 
     def draw_board(self):
         self.canvas.delete("all")
@@ -377,32 +374,28 @@ class ChessGame:
             self.game_over("White")
 
     def game_over(self, winner):
-        # Create a new window for game over
         game_over_window = tk.Toplevel(self.root)
         game_over_window.title("Game Over")
         game_over_window.geometry("300x200")
 
-        # Make the window modal (user must interact with it)
         game_over_window.transient(self.root)
         game_over_window.grab_set()
 
-        # Center the window
         game_over_window.geometry("+%d+%d" % (
             self.root.winfo_rootx() + 50,
             self.root.winfo_rooty() + 50))
 
-        # Add game over message
         tk.Label(game_over_window,
                  text=f"{winner.capitalize()} Wins!",
                  font=("Arial", 24, "bold")).pack(pady=20)
 
-        # Add buttons
         def new_game():
             game_over_window.destroy()
             self.reset_game()
 
-        def quit_game():
-            self.root.quit()
+        def return_to_main():
+            game_over_window.destroy()
+            self.return_to_menu()
 
         tk.Button(game_over_window,
                   text="New Game",
@@ -410,9 +403,9 @@ class ChessGame:
                   command=new_game).pack(pady=10)
 
         tk.Button(game_over_window,
-                  text="Quit",
+                  text="Return to Menu",
                   font=("Arial", 12),
-                  command=quit_game).pack(pady=10)
+                  command=return_to_main).pack(pady=10)
 
     def reset_game(self):
         # Reset board and game state
@@ -449,9 +442,9 @@ class MainMenu:
         self.root = tk.Tk()
         self.root.title("Chess Game")
         self.root.geometry("800x600")
-
-        # Set background color
         self.root.configure(bg='#2C3E50')  # Dark blue background
+
+        self.game_window = None
 
         # Create main frame
         self.main_frame = tk.Frame(self.root, bg='#2C3E50')
@@ -530,7 +523,7 @@ class MainMenu:
 
         # Footer text
         footer_text = tk.Label(footer_frame,
-                               text="© 2025 Chess Game",
+                               text="© Youssefghgg",
                                font=('Helvetica', 10),
                                fg='#95A5A6',  # Grey text
                                bg='#2C3E50')
@@ -544,14 +537,26 @@ class MainMenu:
 
     def start_game(self):
         self.root.withdraw()  # Hide main menu
-        game_window = tk.Toplevel()
-        chess_game = ChessGame(game_window)
+        self.game_window = tk.Toplevel(self.root)
+        self.game_window.title("Chess Game")
+        self.game_window.geometry("800x800")  # Set proper size for game window
+        self.game_window.configure(bg='#2C3E50')
+
+        # Create and start the game
+        chess_game = ChessGame(self.game_window, self)
 
         def on_game_window_close():
-            game_window.destroy()
-            self.root.deiconify()  # Show main menu again
+            self.game_window.destroy()
+            self.game_window = None
+            self.root.deiconify()
 
-        game_window.protocol("WM_DELETE_WINDOW", on_game_window_close)
+        self.game_window.protocol("WM_DELETE_WINDOW", on_game_window_close)
+
+    def show_menu(self):
+        if self.game_window:
+            self.game_window.destroy()
+            self.game_window = None
+        self.root.deiconify()
 
     def run(self):
         self.root.mainloop()
