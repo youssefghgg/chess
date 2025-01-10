@@ -1,6 +1,5 @@
 import tkinter as tk
-from PIL import Image, ImageTk
-import os
+
 
 
 class ChessPiece:
@@ -73,6 +72,7 @@ class ChessGame:
 
         # Bind click event
         self.canvas.bind('<Button-1>', self.on_square_click)
+
     def load_pieces(self):
         piece_files = {
             "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
@@ -96,6 +96,14 @@ class ChessGame:
         for col, piece_name in enumerate(piece_order):
             self.board[0][col] = ChessPiece("black", piece_name)  # Changed to black
             self.board[7][col] = ChessPiece("white", piece_name)  # Changed to white
+
+    def get_valid_moves(self, start):
+        valid_moves = []
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                if self.is_valid_move(start, (row, col)):
+                    valid_moves.append((row, col))
+        return valid_moves
 
     def return_to_menu(self):
         self.root.destroy()  # Close game window
@@ -132,6 +140,18 @@ class ChessGame:
                         font=("Arial", 36),
                         fill="white" if piece.color == "white" else "black"
                     )
+
+        # Highlight valid moves for the selected piece
+        if self.selected_piece:
+            valid_moves = self.get_valid_moves(self.selected_piece)
+            for move in valid_moves:
+                row, col = move
+                x = col * self.cell_size
+                y = row * self.cell_size
+                self.canvas.create_oval(x + 10, y + 10, x + self.cell_size - 10, y + self.cell_size - 10,
+                                        outline="blue", width=2)
+
+        # Highlight castling options
         if self.selected_piece:
             row, col = self.selected_piece
             piece = self.board[row][col]
@@ -147,33 +167,55 @@ class ChessGame:
                     self.canvas.create_rectangle(x, y, x + self.cell_size, y + self.cell_size,
                                                  outline="yellow", width=2)
 
-    def is_valid_castling(self, start, end):
+    def move_puts_in_check(self, start, end):
         start_row, start_col = start
         end_row, end_col = end
-        king = self.board[start_row][start_col]
+        piece = self.board[start_row][start_col]
+        target = self.board[end_row][end_col]
 
-        if king.has_moved:
+        # Temporarily make the move
+        self.board[end_row][end_col] = piece
+        self.board[start_row][start_col] = None
+
+        # Check if the current player's king is in check
+        in_check = self.is_in_check(piece.color)
+
+        # Undo the move
+        self.board[start_row][start_col] = piece
+        self.board[end_row][end_col] = target
+
+        return in_check
+
+    def find_king(self, color):
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece and piece.name == "king" and piece.color == color:
+                    return (row, col)
+        return None
+
+    def is_in_check(self, color):
+        # Find the king's position
+        king_pos = self.find_king(color)
+        if not king_pos:
             return False
 
-        # Determine rook position and target squares
-        if end_col > start_col:  # Kingside castling
-            rook_col = 7
-            path_cols = [5, 6]  # Squares that must be empty
-        else:  # Queenside castling
-            rook_col = 0
-            path_cols = [1, 2, 3]  # Squares that must be empty
+        # Check if any opponent's piece can move to the king's position
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece and piece.color != color:
+                    if self.is_valid_move((row, col), king_pos):
+                        return True
+        return False
 
-        # Check if rook is in position and hasn't moved
-        rook = self.board[start_row][rook_col]
-        if not rook or rook.name != "rook" or rook.has_moved:
-            return False
-
-        # Check if squares between king and rook are empty
-        for col in path_cols:
-            if self.board[start_row][col] is not None:
-                return False
-
-        return True
+    def get_possible_moves(self, piece, row, col):
+        possible_moves = []
+        for r in range(self.board_size):
+            for c in range(self.board_size):
+                if self.is_valid_move((row, col), (r, c)):
+                    possible_moves.append((r, c))
+        return possible_moves
 
     def move_piece(self, start, end):
         start_row, start_col = start
@@ -266,12 +308,12 @@ class ChessGame:
 
         # Basic movement rules for each piece
         if piece.name == "pawn":
-            if piece.color == "white":
+            if piece.color == "white":  # White pawns move up (decreasing row)
                 # Normal pawn moves
                 if start_col == end_col and not target:
                     if end_row == start_row - 1:
                         return True
-                    if not piece.has_moved and end_row == start_row - 2:
+                    if not piece.has_moved and end_row == start_row - 2 and not self.board[start_row - 1][start_col]:
                         return True
                 # Captures (including en passant)
                 if abs(start_col - end_col) == 1 and end_row == start_row - 1:
@@ -283,11 +325,11 @@ class ChessGame:
                             self.board[start_row][end_col].en_passant_vulnerable:
                         return True
                     return False
-            else:  # Black pawn
+            else:  # Black pawns move down (increasing row)
                 if start_col == end_col and not target:
                     if end_row == start_row + 1:
                         return True
-                    if not piece.has_moved and end_row == start_row + 2:
+                    if not piece.has_moved and end_row == start_row + 2 and not self.board[start_row + 1][start_col]:
                         return True
                 if abs(start_col - end_col) == 1 and end_row == start_row + 1:
                     if target:
@@ -297,26 +339,6 @@ class ChessGame:
                         return True
                     return False
 
-        # Basic movement rules for each piece
-        if piece.name == "pawn":
-            if piece.color == "white":  # White pawns now move up (decreasing row)
-                if start_col == end_col and not target:  # Moving forward
-                    if end_row == start_row - 1:  # Changed from + to -
-                        return True
-                    if not piece.has_moved and end_row == start_row - 2:  # Changed from + to -
-                        return True
-                if abs(start_col - end_col) == 1 and end_row == start_row - 1:  # Changed from + to -
-                    return target is not None
-            else:  # Black pawns now move down (increasing row)
-                if start_col == end_col and not target:
-                    if end_row == start_row + 1:  # Changed from - to +
-                        return True
-                    if not piece.has_moved and end_row == start_row + 2:  # Changed from - to +
-                        return True
-                if abs(start_col - end_col) == 1 and end_row == start_row + 1:  # Changed from - to +
-                    return target is not None
-
-        # Rest of the movement rules remain the same
         elif piece.name == "rook":
             return start_row == end_row or start_col == end_col
 
@@ -336,7 +358,11 @@ class ChessGame:
         elif piece.name == "king":
             return abs(start_row - end_row) <= 1 and abs(start_col - end_col) <= 1
 
-        return False
+        # Check if the move puts the player in check
+        if self.move_puts_in_check(start, end):
+            return False
+
+        return True
 
     def promote_pawn(self, row, col):
         # Create promotion window
@@ -431,10 +457,6 @@ class ChessGame:
         tk.Button(control_frame,
                   text="Undo",
                   command=self.undo_move).pack(side=tk.LEFT, padx=10)
-
-    def undo_move(self):
-        # Implement move history and undo functionality
-        pass
 
 
 class MainMenu:
