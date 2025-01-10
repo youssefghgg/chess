@@ -97,12 +97,52 @@ class ChessGame:
             self.board[0][col] = ChessPiece("black", piece_name)  # Changed to black
             self.board[7][col] = ChessPiece("white", piece_name)  # Changed to white
 
+    def is_checkmate(self, color):
+        """
+        Check if the specified color is in checkmate
+        """
+        # If not in check, it's not checkmate
+        if not self.is_in_check(color):
+            return False
+
+        # If in check, see if there are any valid moves that can get out of check
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece and piece.color == color:
+                    for end_row in range(self.board_size):
+                        for end_col in range(self.board_size):
+                            if self.is_valid_move((row, col), (end_row, end_col)):
+                                return False
+        return True
+
     def return_to_menu(self):
         self.root.destroy()  # Close game window
         self.main_menu.root.deiconify()  # Show main menu
 
+    def get_valid_moves(self, start):
+        """
+        Get all valid moves for a piece at the given position
+        """
+        if not start:
+            return []
+
+        start_row, start_col = start
+        piece = self.board[start_row][start_col]
+        if not piece:
+            return []
+
+        valid_moves = []
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                if self.is_valid_move((start_row, start_col), (row, col)):
+                    valid_moves.append((row, col))
+        return valid_moves
+
     def draw_board(self):
         self.canvas.delete("all")
+
+        # Draw squares
         for row in range(self.board_size):
             for col in range(self.board_size):
                 x1 = col * self.cell_size
@@ -132,20 +172,40 @@ class ChessGame:
                         font=("Arial", 36),
                         fill="white" if piece.color == "white" else "black"
                     )
+
+        # Draw move indicators
         if self.selected_piece:
-            row, col = self.selected_piece
-            piece = self.board[row][col]
-            if piece and piece.name == "king" and not piece.has_moved:
-                if self.is_valid_castling((row, col), (row, col + 2)):  # Kingside
-                    x = (col + 2) * self.cell_size
-                    y = row * self.cell_size
-                    self.canvas.create_rectangle(x, y, x + self.cell_size, y + self.cell_size,
-                                                 outline="yellow", width=2)
-                if self.is_valid_castling((row, col), (row, col - 2)):  # Queenside
-                    x = (col - 2) * self.cell_size
-                    y = row * self.cell_size
-                    self.canvas.create_rectangle(x, y, x + self.cell_size, y + self.cell_size,
-                                                 outline="yellow", width=2)
+            valid_moves = self.get_valid_moves(self.selected_piece)
+            for move in valid_moves:
+                row, col = move
+                x = col * self.cell_size + self.cell_size // 2
+                y = row * self.cell_size + self.cell_size // 2
+
+                # Draw different indicators based on the type of move
+                target_piece = self.board[row][col]
+                if target_piece:
+                    # Draw capture indicator (red circle)
+                    self.canvas.create_oval(
+                        x - self.cell_size // 3, y - self.cell_size // 3,
+                        x + self.cell_size // 3, y + self.cell_size // 3,
+                        outline="red", width=2
+                    )
+                else:
+                    # Draw move indicator (green dot)
+                    self.canvas.create_oval(
+                        x - 5, y - 5, x + 5, y + 5,
+                        fill="green", outline="darkgreen"
+                    )
+
+        # Highlight king if in check
+        king_pos = self.find_king(self.current_player)
+        if king_pos and self.is_in_check(self.current_player):
+            row, col = king_pos
+            x1 = col * self.cell_size
+            y1 = row * self.cell_size
+            x2 = x1 + self.cell_size
+            y2 = y1 + self.cell_size
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline="red", width=3)
 
     def is_valid_castling(self, start, end):
         start_row, start_col = start
@@ -175,14 +235,37 @@ class ChessGame:
 
         return True
 
+    def move_puts_in_check(self, start, end):
+        """
+        Check if making this move would put or leave the player's king in check
+        """
+        start_row, start_col = start
+        end_row, end_col = end
+
+        # Store the current board state
+        piece = self.board[start_row][start_col]
+        target = self.board[end_row][end_col]
+
+        # Temporarily make the move
+        self.board[end_row][end_col] = piece
+        self.board[start_row][start_col] = None
+
+        # Check if the king is in check after the move
+        in_check = self.is_in_check(piece.color)
+
+        # Undo the move
+        self.board[start_row][start_col] = piece
+        self.board[end_row][end_col] = target
+
+        return in_check
+
     def move_piece(self, start, end):
         start_row, start_col = start
         end_row, end_col = end
         piece = self.board[start_row][start_col]
 
-        # Check if we're capturing a king
-        target_piece = self.board[end_row][end_col]
-        game_over = target_piece and target_piece.name == "king"
+        # Store last move
+        self.last_move = (start, end)
 
         # Reset en passant vulnerability for all pawns
         for row in self.board:
@@ -212,9 +295,6 @@ class ChessGame:
         if piece.name == "pawn" and abs(start_row - end_row) == 2:
             piece.en_passant_vulnerable = True
 
-        # Store last move
-        self.last_move = (start, end)
-
         # Move piece
         self.board[end_row][end_col] = piece
         self.board[start_row][start_col] = None
@@ -226,117 +306,227 @@ class ChessGame:
                     (piece.color == "black" and end_row == 7):
                 self.promote_pawn(end_row, end_col)
 
-        # Check for game over
-        if game_over:
+        # Check for checkmate on the opponent
+        opponent_color = "black" if piece.color == "white" else "white"
+        if self.is_checkmate(opponent_color):
             self.game_over(piece.color)
 
     def on_square_click(self, event):
-        col = event.x // self.cell_size
-        row = event.y // self.cell_size
+        try:
+            col = event.x // self.cell_size
+            row = event.y // self.cell_size
 
-        if self.selected_piece is None:
-            # Select piece
-            piece = self.board[row][col]
-            if piece and piece.color == self.current_player:
-                self.selected_piece = (row, col)
+            # Validate coordinates
+            if not (0 <= row < self.board_size and 0 <= col < self.board_size):
+                return
+
+            if self.selected_piece is None:
+                # Select piece
+                piece = self.board[row][col]
+                if piece and piece.color == self.current_player:
+                    self.selected_piece = (row, col)
+                    self.draw_board()
+            else:
+                # Move piece if valid
+                if self.is_valid_move(self.selected_piece, (row, col)):
+                    self.move_piece(self.selected_piece, (row, col))
+                    # Switch players only if game isn't over
+                    if not self.is_checkmate("white") and not self.is_checkmate("black"):
+                        self.current_player = "black" if self.current_player == "white" else "white"
+                        self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+                self.selected_piece = None
                 self.draw_board()
-        else:
-            # Move piece
-            if self.is_valid_move(self.selected_piece, (row, col)):
-                self.move_piece(self.selected_piece, (row, col))
-                self.current_player = "black" if self.current_player == "white" else "white"
-                self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+        except Exception as e:
+            print(f"Error in on_square_click: {e}")
             self.selected_piece = None
             self.draw_board()
 
-    def is_valid_move(self, start, end):
+    def is_checkmate(self, color):
+        if not self.is_in_check(color):
+            return False
+        return not self.has_valid_moves(color)
+
+    def is_stalemate(self, color):
+        if self.is_in_check(color):
+            return False
+        return not self.has_valid_moves(color)
+
+    def has_valid_moves(self, color):
+        """
+        Check if the specified color has any valid moves
+        """
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece and piece.color == color:
+                    for r in range(self.board_size):
+                        for c in range(self.board_size):
+                            if self.is_valid_move((row, col), (r, c)):
+                                return True
+        return False
+
+    def is_valid_basic_move(self, start, end):
         start_row, start_col = start
         end_row, end_col = end
+
+        # Basic boundary checks
+        if not (0 <= start_row < 8 and 0 <= start_col < 8 and 0 <= end_row < 8 and 0 <= end_col < 8):
+            return False
+
         piece = self.board[start_row][start_col]
         target = self.board[end_row][end_col]
+
+        # Must have a piece to move
+        if not piece:
+            return False
 
         # Can't capture own pieces
         if target and target.color == piece.color:
             return False
 
-        # Check castling
-        if piece.name == "king" and not piece.has_moved:
-            if abs(end_col - start_col) == 2:
-                return self.is_valid_castling(start, end)
+        # Calculate move deltas
+        row_diff = end_row - start_row
+        col_diff = end_col - start_col
 
-        # Basic movement rules for each piece
+        # Check piece-specific movement rules
         if piece.name == "pawn":
             if piece.color == "white":
-                # Normal pawn moves
-                if start_col == end_col and not target:
-                    if end_row == start_row - 1:
+                # Normal move forward
+                if col_diff == 0 and not target:
+                    if row_diff == -1:
                         return True
-                    if not piece.has_moved and end_row == start_row - 2:
-                        return True
-                # Captures (including en passant)
-                if abs(start_col - end_col) == 1 and end_row == start_row - 1:
+                    # First move can be two squares
+                    if not piece.has_moved and row_diff == -2:
+                        return not self.board[start_row - 1][start_col]  # Path must be clear
+
+                # Capture moves (including en passant)
+                if row_diff == -1 and abs(col_diff) == 1:
                     # Normal capture
                     if target:
                         return True
                     # En passant
-                    if self.last_move and self.board[start_row][end_col] and \
-                            self.board[start_row][end_col].en_passant_vulnerable:
+                    if (self.last_move and
+                            self.board[start_row][end_col] and
+                            self.board[start_row][end_col].name == "pawn" and
+                            self.board[start_row][end_col].en_passant_vulnerable):
                         return True
-                    return False
+
             else:  # Black pawn
-                if start_col == end_col and not target:
-                    if end_row == start_row + 1:
+                # Normal move forward
+                if col_diff == 0 and not target:
+                    if row_diff == 1:
                         return True
-                    if not piece.has_moved and end_row == start_row + 2:
-                        return True
-                if abs(start_col - end_col) == 1 and end_row == start_row + 1:
+                    # First move can be two squares
+                    if not piece.has_moved and row_diff == 2:
+                        return not self.board[start_row + 1][start_col]  # Path must be clear
+
+                # Capture moves (including en passant)
+                if row_diff == 1 and abs(col_diff) == 1:
+                    # Normal capture
                     if target:
                         return True
-                    if self.last_move and self.board[start_row][end_col] and \
-                            self.board[start_row][end_col].en_passant_vulnerable:
+                    # En passant
+                    if (self.last_move and
+                            self.board[start_row][end_col] and
+                            self.board[start_row][end_col].name == "pawn" and
+                            self.board[start_row][end_col].en_passant_vulnerable):
                         return True
-                    return False
 
-        # Basic movement rules for each piece
-        if piece.name == "pawn":
-            if piece.color == "white":  # White pawns now move up (decreasing row)
-                if start_col == end_col and not target:  # Moving forward
-                    if end_row == start_row - 1:  # Changed from + to -
-                        return True
-                    if not piece.has_moved and end_row == start_row - 2:  # Changed from + to -
-                        return True
-                if abs(start_col - end_col) == 1 and end_row == start_row - 1:  # Changed from + to -
-                    return target is not None
-            else:  # Black pawns now move down (increasing row)
-                if start_col == end_col and not target:
-                    if end_row == start_row + 1:  # Changed from - to +
-                        return True
-                    if not piece.has_moved and end_row == start_row + 2:  # Changed from - to +
-                        return True
-                if abs(start_col - end_col) == 1 and end_row == start_row + 1:  # Changed from - to +
-                    return target is not None
-
-        # Rest of the movement rules remain the same
-        elif piece.name == "rook":
-            return start_row == end_row or start_col == end_col
+            return False
 
         elif piece.name == "knight":
-            row_diff = abs(start_row - end_row)
-            col_diff = abs(start_col - end_col)
-            return (row_diff == 2 and col_diff == 1) or (row_diff == 1 and col_diff == 2)
-
-        elif piece.name == "bishop":
-            return abs(start_row - end_row) == abs(start_col - end_col)
-
-        elif piece.name == "queen":
-            return (start_row == end_row or
-                    start_col == end_col or
-                    abs(start_row - end_row) == abs(start_col - end_col))
+            # Knights move in L-shape and can jump over pieces
+            return (abs(row_diff), abs(col_diff)) in [(2, 1), (1, 2)]
 
         elif piece.name == "king":
-            return abs(start_row - end_row) <= 1 and abs(start_col - end_col) <= 1
+            # Normal king move (one square in any direction)
+            if abs(row_diff) <= 1 and abs(col_diff) <= 1:
+                return True
+
+            # Castling
+            if not piece.has_moved and abs(col_diff) == 2 and row_diff == 0:
+                # Check if it's a valid castling move
+                return self.is_valid_castling(start, end)
+
+            return False
+
+        # For pieces that move in straight lines (rook, bishop, queen)
+        # Check if the path is clear
+        if piece.name in ["rook", "bishop", "queen"]:
+            # Rook moves (horizontal/vertical)
+            valid_rook_move = row_diff == 0 or col_diff == 0
+            # Bishop moves (diagonal)
+            valid_bishop_move = abs(row_diff) == abs(col_diff)
+
+            # Determine if the piece can move this way
+            if piece.name == "rook" and not valid_rook_move:
+                return False
+            if piece.name == "bishop" and not valid_bishop_move:
+                return False
+            if piece.name == "queen" and not (valid_rook_move or valid_bishop_move):
+                return False
+
+            # Check if path is clear
+            row_step = 0 if row_diff == 0 else row_diff // abs(row_diff)
+            col_step = 0 if col_diff == 0 else col_diff // abs(col_diff)
+
+            current_row = start_row + row_step
+            current_col = start_col + col_step
+
+            while (current_row, current_col) != (end_row, end_col):
+                if self.board[current_row][current_col]:
+                    return False
+                current_row += row_step
+                current_col += col_step
+
+            return True
 
         return False
+
+    def is_in_check(self, color):
+        """
+        Determine if the king of the specified color is in check
+        """
+        # Find the king's position
+        king_pos = self.find_king(color)
+        if not king_pos:
+            return False
+
+        # Check if any opponent's piece can attack the king
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece and piece.color != color:
+                    if self.is_valid_basic_move((row, col), king_pos):
+                        return True
+        return False
+
+    def is_valid_move(self, start, end):
+        """
+        Check if a move from start to end is valid
+        """
+        if not start or not end:
+            return False
+
+        start_row, start_col = start
+        end_row, end_col = end
+
+        # Basic boundary checks
+        if not (0 <= start_row < self.board_size and
+                0 <= start_col < self.board_size and
+                0 <= end_row < self.board_size and
+                0 <= end_col < self.board_size):
+            return False
+
+        # Check basic move validity
+        if not self.is_valid_basic_move(start, end):
+            return False
+
+        # Check if move puts or leaves king in check
+        if self.move_puts_in_check(start, end):
+            return False
+
+        return True
 
     def promote_pawn(self, row, col):
         # Create promotion window
@@ -379,15 +569,17 @@ class ChessGame:
         game_over_window.geometry("300x200")
 
         game_over_window.transient(self.root)
-        game_over_window.grab_set()
+        game_over_window.grab_set()  # Make the window modal
 
+        # Center the window
         game_over_window.geometry("+%d+%d" % (
             self.root.winfo_rootx() + 50,
             self.root.winfo_rooty() + 50))
 
+        # Show winner
         tk.Label(game_over_window,
-                 text=f"{winner.capitalize()} Wins!",
-                 font=("Arial", 24, "bold")).pack(pady=20)
+                 text=f"Checkmate!\n{winner.capitalize()} Wins!",
+                 font=("Arial", 24, "bold")).pack(pady=10)
 
         def new_game():
             game_over_window.destroy()
@@ -397,6 +589,7 @@ class ChessGame:
             game_over_window.destroy()
             self.return_to_menu()
 
+        # Add buttons
         tk.Button(game_over_window,
                   text="New Game",
                   font=("Arial", 12),
@@ -406,6 +599,21 @@ class ChessGame:
                   text="Return to Menu",
                   font=("Arial", 12),
                   command=return_to_main).pack(pady=10)
+
+        # Disable the main game window while showing game over
+        self.canvas.unbind('<Button-1>')  # Prevent further moves
+
+    def find_king(self, color):
+        """
+        Find the position of the king of the specified color
+        Returns: tuple (row, col) or None if not found
+        """
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece and piece.name == "king" and piece.color == color:
+                    return (row, col)
+        return None
 
     def reset_game(self):
         # Reset board and game state
@@ -431,6 +639,64 @@ class ChessGame:
         tk.Button(control_frame,
                   text="Undo",
                   command=self.undo_move).pack(side=tk.LEFT, padx=10)
+
+    def get_pins(self, color):
+        pins = []
+        king_pos = self.find_king(color)
+        if not king_pos:
+            return pins
+
+        king_row, king_col = king_pos
+
+        # Check all directions for pins
+        directions = [
+            (-1, 0), (1, 0), (0, -1), (0, 1),  # Rook directions
+            (-1, -1), (-1, 1), (1, -1), (1, 1)  # Bishop directions
+        ]
+
+        for direction in directions:
+            possible_pin = None
+            for i in range(1, 8):
+                row = king_row + direction[0] * i
+                col = king_col + direction[1] * i
+
+                if not (0 <= row < 8 and 0 <= col < 8):
+                    break
+
+                current_piece = self.board[row][col]
+                if current_piece:
+                    if current_piece.color == color:
+                        if possible_pin is None:
+                            possible_pin = (row, col, direction[0], direction[1])
+                        else:
+                            break
+                    else:
+                        # Check if piece can pin
+                        if possible_pin:
+                            piece_name = current_piece.name
+                            if ((piece_name == "rook" and direction[0] * direction[1] == 0) or
+                                    (piece_name == "bishop" and direction[0] * direction[1] != 0) or
+                                    (piece_name == "queen")):
+                                pins.append(possible_pin)
+                        break
+        return pins
+
+    def get_checks(self, color):
+        checks = []
+        king_pos = self.find_king(color)
+        if not king_pos:
+            return checks
+
+        king_row, king_col = king_pos
+
+        # Check all possible attacking pieces
+        for row in range(8):
+            for col in range(8):
+                piece = self.board[row][col]
+                if piece and piece.color != color:
+                    if self.is_valid_basic_move((row, col), king_pos):
+                        checks.append((row, col))
+        return checks
 
     def undo_move(self):
         # Implement move history and undo functionality
