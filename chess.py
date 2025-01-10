@@ -1,6 +1,5 @@
 import tkinter as tk
-from PIL import Image, ImageTk
-import os
+
 
 
 class ChessPiece:
@@ -17,12 +16,41 @@ class ChessGame:
         self.main_menu = main_menu
         self.root.title("Chess Game")
 
-        # Create main container with grid
+        # Main container
         self.main_container = tk.Frame(self.root, bg='#2C3E50')
         self.main_container.pack(expand=True, fill='both', padx=20, pady=20)
 
-        # Create evaluation frame on the left
-        self.eval_frame = tk.Frame(self.main_container, bg='#2C3E50', width=100)
+        # Top control panel
+        self.control_panel = tk.Frame(self.main_container, bg='#2C3E50')
+        self.control_panel.pack(fill='x', pady=(0, 10))
+
+        # Return to menu button
+        self.menu_button = tk.Button(self.control_panel,
+                                     text="Return to Menu",
+                                     command=self.return_to_menu,
+                                     font=('Helvetica', 12),
+                                     bg='#34495E',
+                                     fg='white',
+                                     activebackground='#2C3E50',
+                                     activeforeground='white',
+                                     bd=0,
+                                     cursor='hand2')
+        self.menu_button.pack(side=tk.LEFT, padx=10)
+
+        # Turn indicator
+        self.turn_label = tk.Label(self.control_panel,
+                                   text="White's turn",
+                                   font=("Helvetica", 16),
+                                   bg='#2C3E50',
+                                   fg='white')
+        self.turn_label.pack(side=tk.LEFT, padx=20)
+
+        # Game area container
+        self.game_area = tk.Frame(self.main_container, bg='#2C3E50')
+        self.game_area.pack(expand=True, fill='both')
+
+        # Evaluation frame on the left
+        self.eval_frame = tk.Frame(self.game_area, bg='#2C3E50', width=100)
         self.eval_frame.pack(side=tk.LEFT, padx=20, fill='y')
 
         # Material count labels
@@ -35,11 +63,11 @@ class ChessGame:
         )
         self.black_material_label.pack(pady=10)
 
-        # Larger evaluation bar
+        # Evaluation bar
         self.eval_canvas = tk.Canvas(
             self.eval_frame,
-            width=60,  # Wider bar
-            height=500,  # Taller bar
+            width=60,
+            height=500,
             bg='#34495E',
             highlightthickness=1,
             highlightbackground='#95A5A6'
@@ -55,11 +83,19 @@ class ChessGame:
         )
         self.white_material_label.pack(pady=10)
 
-        # Create game container for the board
-        self.game_container = tk.Frame(self.main_container, bg='#2C3E50')
-        self.game_container.pack(side=tk.LEFT, expand=True, fill='both')
+        # Chess board container
+        self.board_container = tk.Frame(self.game_area, bg='#2C3E50')
+        self.board_container.pack(side=tk.LEFT, expand=True, fill='both')
 
-        # Initialize piece images dictionary
+        # Initialize game components
+        self.selected_piece = None
+        self.current_player = "white"
+        self.last_move = None
+        self.board_size = 8
+        self.cell_size = 80
+        self.canvas_size = self.board_size * self.cell_size
+
+        # Initialize piece images
         self.piece_images = {
             "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
             "white_bishop": "♗", "white_queen": "♕", "white_king": "♔",
@@ -67,54 +103,23 @@ class ChessGame:
             "black_bishop": "♝", "black_queen": "♛", "black_king": "♚"
         }
 
-        # Create a frame for the game content (only once)
-        self.game_container = tk.Frame(self.root, bg='#2C3E50')
-        self.game_container.pack(expand=True, fill='both', padx=20, pady=20)
+        # Create the chess board canvas
+        self.canvas = tk.Canvas(
+            self.board_container,
+            width=self.canvas_size,
+            height=self.canvas_size,
+            bg='#ECF0F1'
+        )
+        self.canvas.pack(padx=20, pady=20)
 
-        # Initialize game components
-        self.selected_piece = None
-        self.current_player = "white"
-        self.last_move = None
-
-        # Add a return to menu button
-        self.menu_button = tk.Button(self.game_container,
-                                     text="Return to Menu",
-                                     command=self.return_to_menu,
-                                     font=('Helvetica', 12),
-                                     bg='#34495E',
-                                     fg='white',
-                                     activebackground='#2C3E50',
-                                     activeforeground='white',
-                                     bd=0,
-                                     cursor='hand2')
-        self.menu_button.pack(pady=(0, 10))
-
-        # Create and pack the turn indicator
-        self.turn_label = tk.Label(self.game_container,
-                                   text="White's turn",
-                                   font=("Helvetica", 16),
-                                   bg='#2C3E50',
-                                   fg='white')
-        self.turn_label.pack(pady=10)
-
-        # Create the chess board
-        self.board_size = 8
-        self.cell_size = 60
-        self.canvas_size = self.board_size * self.cell_size
-
-        self.canvas = tk.Canvas(self.game_container,
-                                width=self.canvas_size,
-                                height=self.canvas_size,
-                                bg='#ECF0F1')
-        self.canvas.pack(pady=20)
-
-        # Initialize the game
+        # Initialize the board
         self.board = [[None for _ in range(self.board_size)] for _ in range(self.board_size)]
         self.create_pieces()
         self.draw_board()
 
         # Bind click event
         self.canvas.bind('<Button-1>', self.on_square_click)
+
     def load_pieces(self):
         piece_files = {
             "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
@@ -256,16 +261,19 @@ class ChessGame:
         end_row, end_col = end
         king = self.board[start_row][start_col]
 
-        if king.has_moved:
+        # Basic checks
+        if king.has_moved or self.is_in_check(king.color):
             return False
 
         # Determine rook position and target squares
         if end_col > start_col:  # Kingside castling
             rook_col = 7
-            path_cols = [5, 6]  # Squares that must be empty
+            path_cols = [5, 6]  # Squares that must be empty and safe
+            through_squares = [(start_row, 5), (start_row, 6)]  # Squares the king moves through
         else:  # Queenside castling
             rook_col = 0
-            path_cols = [1, 2, 3]  # Squares that must be empty
+            path_cols = [1, 2, 3]  # Squares that must be empty and safe
+            through_squares = [(start_row, 2), (start_row, 3)]  # Squares the king moves through
 
         # Check if rook is in position and hasn't moved
         rook = self.board[start_row][rook_col]
@@ -275,6 +283,32 @@ class ChessGame:
         # Check if squares between king and rook are empty
         for col in path_cols:
             if self.board[start_row][col] is not None:
+                return False
+
+        # Check if the king moves through or ends up on any square that is under attack
+        for square in through_squares:
+            # Temporarily move king to check if square is safe
+            original_king = self.board[start_row][start_col]
+            self.board[start_row][start_col] = None
+            self.board[square[0]][square[1]] = king
+
+            # Check if this square is under attack
+            square_under_attack = False
+            for r in range(self.board_size):
+                for c in range(self.board_size):
+                    piece = self.board[r][c]
+                    if piece and piece.color != king.color:
+                        if self.is_valid_basic_move((r, c), square):
+                            square_under_attack = True
+                            break
+                if square_under_attack:
+                    break
+
+            # Move king back
+            self.board[start_row][start_col] = original_king
+            self.board[square[0]][square[1]] = None
+
+            if square_under_attack:
                 return False
 
         return True
@@ -554,14 +588,12 @@ class ChessGame:
         return False
 
     def is_valid_move(self, start, end):
-        """
-        Check if a move from start to end is valid
-        """
         if not start or not end:
             return False
 
         start_row, start_col = start
         end_row, end_col = end
+        piece = self.board[start_row][start_col]
 
         # Basic boundary checks
         if not (0 <= start_row < self.board_size and
@@ -569,6 +601,10 @@ class ChessGame:
                 0 <= end_row < self.board_size and
                 0 <= end_col < self.board_size):
             return False
+
+        # For castling moves
+        if piece and piece.name == "king" and abs(end_col - start_col) == 2:
+            return self.is_valid_castling(start, end)
 
         # Check basic move validity
         if not self.is_valid_basic_move(start, end):
@@ -780,10 +816,10 @@ class ChessGame:
         black_symbols = '♟' * int(black_material // 3)
 
         self.white_material_label.config(
-            text=f"White: {white_material:.1f} {white_symbols}"
+            text=f"White: {white_material:.1f}"
         )
         self.black_material_label.config(
-            text=f"Black: {black_material:.1f} {black_symbols}"
+            text=f"Black: {black_material:.1f}"
         )
 
         # Update evaluation bar
@@ -1034,18 +1070,12 @@ class MainMenu:
         self.root.withdraw()  # Hide main menu
         self.game_window = tk.Toplevel(self.root)
         self.game_window.title("Chess Game")
-        self.game_window.geometry("800x800")  # Set proper size for game window
+        self.game_window.geometry("1200x900")  # Increased window size
         self.game_window.configure(bg='#2C3E50')
+        self.game_window.resizable(False, False)  # Prevent window resizing
 
         # Create and start the game
         chess_game = ChessGame(self.game_window, self)
-
-        def on_game_window_close():
-            self.game_window.destroy()
-            self.game_window = None
-            self.root.deiconify()
-
-        self.game_window.protocol("WM_DELETE_WINDOW", on_game_window_close)
 
     def show_menu(self):
         if self.game_window:
@@ -1057,7 +1087,6 @@ class MainMenu:
         self.root.mainloop()
 
 
-# Modify your main execution to use the new menu
 if __name__ == "__main__":
     menu = MainMenu()
     menu.run()
