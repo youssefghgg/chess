@@ -17,6 +17,48 @@ class ChessGame:
         self.main_menu = main_menu
         self.root.title("Chess Game")
 
+        # Create main container with grid
+        self.main_container = tk.Frame(self.root, bg='#2C3E50')
+        self.main_container.pack(expand=True, fill='both', padx=20, pady=20)
+
+        # Create evaluation frame on the left
+        self.eval_frame = tk.Frame(self.main_container, bg='#2C3E50', width=100)
+        self.eval_frame.pack(side=tk.LEFT, padx=20, fill='y')
+
+        # Material count labels
+        self.black_material_label = tk.Label(
+            self.eval_frame,
+            text="Black: 0",
+            font=("Helvetica", 14, "bold"),
+            bg='#2C3E50',
+            fg='white'
+        )
+        self.black_material_label.pack(pady=10)
+
+        # Larger evaluation bar
+        self.eval_canvas = tk.Canvas(
+            self.eval_frame,
+            width=60,  # Wider bar
+            height=500,  # Taller bar
+            bg='#34495E',
+            highlightthickness=1,
+            highlightbackground='#95A5A6'
+        )
+        self.eval_canvas.pack(pady=10)
+
+        self.white_material_label = tk.Label(
+            self.eval_frame,
+            text="White: 0",
+            font=("Helvetica", 14, "bold"),
+            bg='#2C3E50',
+            fg='white'
+        )
+        self.white_material_label.pack(pady=10)
+
+        # Create game container for the board
+        self.game_container = tk.Frame(self.main_container, bg='#2C3E50')
+        self.game_container.pack(side=tk.LEFT, expand=True, fill='both')
+
         # Initialize piece images dictionary
         self.piece_images = {
             "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
@@ -96,6 +138,8 @@ class ChessGame:
         for col, piece_name in enumerate(piece_order):
             self.board[0][col] = ChessPiece("black", piece_name)  # Changed to black
             self.board[7][col] = ChessPiece("white", piece_name)  # Changed to white
+        # Update evaluation after creating pieces
+        self.update_evaluation_display()
 
     def is_checkmate(self, color):
         """
@@ -307,6 +351,14 @@ class ChessGame:
                 self.promote_pawn(end_row, end_col)
 
         # Check for checkmate on the opponent
+        opponent_color = "black" if piece.color == "white" else "white"
+        if self.is_checkmate(opponent_color):
+            self.game_over(piece.color)
+
+        # Update evaluation immediately after the move
+        self.update_evaluation_display()
+
+        # Check for checkmate
         opponent_color = "black" if piece.color == "white" else "white"
         if self.is_checkmate(opponent_color):
             self.game_over(piece.color)
@@ -603,6 +655,181 @@ class ChessGame:
         # Disable the main game window while showing game over
         self.canvas.unbind('<Button-1>')  # Prevent further moves
 
+    def get_piece_value(self, piece):
+        """Return the standard piece values"""
+        values = {
+            "pawn": 1,
+            "knight": 3,
+            "bishop": 3.25,  # Slightly higher than knight
+            "rook": 5,
+            "queen": 9,
+            "king": 0  # King's value isn't counted in material
+        }
+        return values.get(piece.name, 0)
+
+    def evaluate_position(self):
+        """
+        Evaluate the current position
+        Returns a score (positive favors white, negative favors black)
+        """
+        white_score = 0
+        black_score = 0
+
+        # Material counting
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece:
+                    value = self.get_piece_value(piece)
+
+                    # Add position-based bonuses
+                    if piece.name == "pawn":
+                        # Pawns are worth more as they advance
+                        if piece.color == "white":
+                            value += (7 - row) * 0.1
+                        else:
+                            value += row * 0.1
+                    elif piece.name in ["knight", "bishop"]:
+                        # Minor pieces are worth more in the center
+                        center_distance = abs(3.5 - row) + abs(3.5 - col)
+                        value += (4 - center_distance) * 0.1
+
+                    if piece.color == "white":
+                        white_score += value
+                    else:
+                        black_score += value
+
+        # Check and checkmate evaluation
+        if self.is_in_check("black"):
+            if self.is_checkmate("black"):
+                white_score += 100  # Checkmate
+            else:
+                white_score += 0.5  # Check
+
+        if self.is_in_check("white"):
+            if self.is_checkmate("white"):
+                black_score += 100  # Checkmate
+            else:
+                black_score += 0.5  # Check
+
+        return white_score - black_score
+
+    def evaluate_position(self):
+        """
+        Evaluate the current position
+        Returns a score (positive favors white, negative favors black)
+        """
+        white_score = 0
+        black_score = 0
+
+        # Material counting
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece:
+                    value = self.get_piece_value(piece)
+                    if piece.color == "white":
+                        white_score += value
+                    else:
+                        black_score += value
+
+        # Position evaluation (basic)
+        # Center control
+        center_squares = [(3, 3), (3, 4), (4, 3), (4, 4)]
+        for row, col in center_squares:
+            piece = self.board[row][col]
+            if piece:
+                bonus = 0.2
+                if piece.color == "white":
+                    white_score += bonus
+                else:
+                    black_score += bonus
+
+        # King safety
+        white_king_pos = self.find_king("white")
+        black_king_pos = self.find_king("black")
+
+        if white_king_pos:
+            if self.is_in_check("white"):
+                white_score -= 0.5
+        if black_king_pos:
+            if self.is_in_check("black"):
+                black_score -= 0.5
+
+        return white_score - black_score
+
+    def update_evaluation_display(self):
+        """Update the evaluation bar and material count"""
+        eval_score = self.evaluate_position()
+
+        # Calculate material count
+        white_material = 0
+        black_material = 0
+        for row in self.board:
+            for piece in row:
+                if piece:
+                    value = self.get_piece_value(piece)
+                    if piece.color == "white":
+                        white_material += value
+                    else:
+                        black_material += value
+
+        # Update material count labels with piece symbols
+        # Convert to int for string multiplication
+        white_symbols = '♙' * int(white_material // 3)
+        black_symbols = '♟' * int(black_material // 3)
+
+        self.white_material_label.config(
+            text=f"White: {white_material:.1f} {white_symbols}"
+        )
+        self.black_material_label.config(
+            text=f"Black: {black_material:.1f} {black_symbols}"
+        )
+
+        # Update evaluation bar
+        max_height = 500  # Match canvas height
+        middle = max_height / 2
+
+        # Convert evaluation score to visual representation
+        bar_height = middle + (middle * eval_score / 10)  # Scale factor of 10
+        bar_height = max(0, min(max_height, bar_height))
+
+        # Clear previous bar
+        self.eval_canvas.delete("all")
+
+        # Draw middle line
+        self.eval_canvas.create_line(
+            0, middle, 60, middle,
+            fill='#95A5A6',
+            width=1
+        )
+
+        # Draw evaluation bar
+        if eval_score >= 0:
+            # White advantage - draw from middle up
+            self.eval_canvas.create_rectangle(
+                5, middle - (bar_height - middle),
+                55, middle,
+                fill="#27AE60",  # Green for white advantage
+                outline="#2ECC71"
+            )
+        else:
+            # Black advantage - draw from middle down
+            self.eval_canvas.create_rectangle(
+                5, middle,
+                55, bar_height,
+                fill="#E74C3C",  # Red for black advantage
+                outline="#C0392B"
+            )
+
+        # Add evaluation text
+        self.eval_canvas.create_text(
+            30, 250,  # Centered
+            text=f"{abs(eval_score):.1f}",
+            fill="white",
+            font=("Helvetica", 12, "bold")
+        )
+
     def find_king(self, color):
         """
         Find the position of the king of the specified color
@@ -624,6 +851,8 @@ class ChessGame:
         self.last_move = None
         self.turn_label.config(text="White's turn")
         self.draw_board()
+        # Update evaluation after reset
+        self.update_evaluation_display()
 
     def add_controls(self):
         # Create control frame
