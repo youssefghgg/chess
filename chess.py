@@ -1,5 +1,5 @@
 import tkinter as tk
-
+from tkinter import messagebox
 
 
 class ChessPiece:
@@ -15,6 +15,11 @@ class ChessGame:
         self.root = root
         self.main_menu = main_menu
         self.root.title("Chess Game")
+
+        # Initialize game state variables
+        self.move_history = []
+        self.halfmove_clock = 0
+        self.position_counts = {}
 
         # Main container
         self.main_container = tk.Frame(self.root, bg='#2C3E50')
@@ -36,6 +41,21 @@ class ChessGame:
                                      bd=0,
                                      cursor='hand2')
         self.menu_button.pack(side=tk.LEFT, padx=10)
+
+        # Draw button
+        self.draw_button = tk.Button(
+            self.control_panel,
+            text="Offer Draw",
+            command=self.offer_draw,
+            font=('Helvetica', 12),
+            bg='#34495E',
+            fg='white',
+            activebackground='#2C3E50',
+            activeforeground='white',
+            bd=0,
+            cursor='hand2'
+        )
+        self.draw_button.pack(side=tk.LEFT, padx=10)
 
         # Turn indicator
         self.turn_label = tk.Label(self.control_panel,
@@ -120,6 +140,11 @@ class ChessGame:
         # Bind click event
         self.canvas.bind('<Button-1>', self.on_square_click)
 
+
+        self.move_history = []  # Store positions for threefold repetition
+        self.halfmove_clock = 0  # For fifty-move rule
+        self.position_counts = {}  # For tracking repeated positions
+
     def load_pieces(self):
         piece_files = {
             "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
@@ -145,6 +170,141 @@ class ChessGame:
             self.board[7][col] = ChessPiece("white", piece_name)  # Changed to white
         # Update evaluation after creating pieces
         self.update_evaluation_display()
+
+    def is_draw(self):
+        """Check all draw conditions"""
+        if self.is_stalemate(self.current_player):
+            self.draw_game("Stalemate")
+            return True
+        if self.is_insufficient_material():
+            self.draw_game("Insufficient Material")
+            return True
+        if self.is_threefold_repetition():
+            self.draw_game("Threefold Repetition")
+            return True
+        if self.is_fifty_move_rule():
+            self.draw_game("Fifty-Move Rule")
+            return True
+        if self.is_dead_position():
+            self.draw_game("Dead Position")
+            return True
+        return False
+
+    def is_insufficient_material(self):
+        """Check if there's insufficient material for checkmate"""
+        pieces = {'white': [], 'black': []}
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece:
+                    pieces[piece.color].append(piece.name)
+
+        # Remove kings from the count
+        for color in pieces:
+            pieces[color].remove('king')
+
+        # Check insufficient material conditions
+        for color in pieces:
+            if not pieces[color]:  # Only king
+                continue
+            if len(pieces[color]) == 1:
+                if pieces[color][0] in ['bishop', 'knight']:  # King and bishop/knight
+                    continue
+            return False
+        return True
+
+    def is_threefold_repetition(self):
+        """Check if the current position has occurred three times"""
+        position = self.get_position_string()
+        self.position_counts[position] = self.position_counts.get(position, 0) + 1
+        return self.position_counts[position] >= 3
+
+    def is_fifty_move_rule(self):
+        """Check if fifty moves have been made without pawn movement or capture"""
+        return self.halfmove_clock >= 100  # 50 moves = 100 halfmoves
+
+    def is_dead_position(self):
+        """Check if the position is dead (impossible to checkmate)"""
+        pieces = {'white': [], 'black': []}
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece:
+                    pieces[piece.color].append(piece.name)
+
+        # King vs King
+        if len(pieces['white']) == 1 and len(pieces['black']) == 1:
+            return True
+
+        # King and bishop/knight vs King
+        for color in ['white', 'black']:
+            other = 'black' if color == 'white' else 'white'
+            if len(pieces[color]) == 2 and len(pieces[other]) == 1:
+                if 'bishop' in pieces[color] or 'knight' in pieces[color]:
+                    return True
+
+        return False
+
+    def get_position_string(self):
+        """Convert current board position to a string for comparison"""
+        position = ""
+        for row in range(self.board_size):
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece:
+                    position += f"{piece.color}_{piece.name}_{row}_{col}_"
+        position += f"{self.current_player}"
+        return position
+
+    def draw_game(self, reason):
+        """Handle the draw game window"""
+        draw_window = tk.Toplevel(self.root)
+        draw_window.title("Game Draw")
+        draw_window.geometry("300x200")
+        draw_window.transient(self.root)
+        draw_window.grab_set()
+
+        # Center the window
+        draw_window.geometry("+%d+%d" % (
+            self.root.winfo_rootx() + 50,
+            self.root.winfo_rooty() + 50))
+
+        # Show draw message
+        tk.Label(draw_window,
+                 text=f"Draw!\n{reason}",
+                 font=("Arial", 24, "bold")).pack(pady=10)
+
+        def new_game():
+            draw_window.destroy()
+            self.reset_game()
+
+        def return_to_main():
+            draw_window.destroy()
+            self.return_to_menu()
+
+        # Add buttons
+        tk.Button(draw_window,
+                  text="New Game",
+                  font=("Arial", 12),
+                  command=new_game).pack(pady=10)
+
+        tk.Button(draw_window,
+                  text="Return to Menu",
+                  font=("Arial", 12),
+                  command=return_to_main).pack(pady=10)
+
+        # Disable the main game window
+        self.canvas.unbind('<Button-1>')
+
+    def offer_draw(self):
+        """Handle draw offers"""
+        response = messagebox.askyesno(
+            "Draw Offer",
+            f"{self.current_player.capitalize()} offers a draw.\nDoes {('Black' if self.current_player == 'white' else 'White')} accept?",
+            parent=self.root
+        )
+        if response:
+            self.draw_game("Draw by Agreement")
 
     def is_checkmate(self, color):
         """
@@ -341,6 +501,13 @@ class ChessGame:
         start_row, start_col = start
         end_row, end_col = end
         piece = self.board[start_row][start_col]
+        target = self.board[end_row][end_col]
+
+        # Update halfmove clock
+        if piece.name == 'pawn' or target:
+            self.halfmove_clock = 0
+        else:
+            self.halfmove_clock += 1
 
         # Store last move
         self.last_move = (start, end)
@@ -373,6 +540,9 @@ class ChessGame:
         if piece.name == "pawn" and abs(start_row - end_row) == 2:
             piece.en_passant_vulnerable = True
 
+        # Store current position before the move for threefold repetition check
+        position_before = self.get_position_string()
+
         # Move piece
         self.board[end_row][end_col] = piece
         self.board[start_row][start_col] = None
@@ -384,18 +554,58 @@ class ChessGame:
                     (piece.color == "black" and end_row == 7):
                 self.promote_pawn(end_row, end_col)
 
+        # Add new position to history
+        new_position = self.get_position_string()
+        self.position_counts[new_position] = self.position_counts.get(new_position, 0) + 1
+
         # Check for checkmate on the opponent
         opponent_color = "black" if piece.color == "white" else "white"
         if self.is_checkmate(opponent_color):
             self.game_over(piece.color)
+            return
+
+        # Check for draws
+        if self.is_stalemate(opponent_color):
+            self.draw_game("Stalemate")
+            return
+        if self.is_insufficient_material():
+            self.draw_game("Insufficient Material")
+            return
+        if self.is_threefold_repetition():
+            self.draw_game("Threefold Repetition")
+            return
+        if self.is_fifty_move_rule():
+            self.draw_game("Fifty-Move Rule")
+            return
+        if self.is_dead_position():
+            self.draw_game("Dead Position")
+            return
 
         # Update evaluation immediately after the move
         self.update_evaluation_display()
 
-        # Check for checkmate
-        opponent_color = "black" if piece.color == "white" else "white"
-        if self.is_checkmate(opponent_color):
-            self.game_over(piece.color)
+        # Switch players
+        self.current_player = opponent_color
+        self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+
+        # Update the board display
+        self.draw_board()
+
+    def add_draw_button(self):
+        """Add draw offer button to control panel"""
+        self.draw_button = tk.Button(
+            self.control_panel,
+            text="Offer Draw",
+            command=self.offer_draw,
+            font=('Helvetica', 12),
+            bg='#34495E',
+            fg='white',
+            activebackground='#2C3E50',
+            activeforeground='white',
+            bd=0,
+            cursor='hand2'
+        )
+        self.draw_button.pack(side=tk.LEFT, padx=10)
 
     def on_square_click(self, event):
         try:
@@ -1076,6 +1286,7 @@ class MainMenu:
 
         # Create and start the game
         chess_game = ChessGame(self.game_window, self)
+
 
     def show_menu(self):
         if self.game_window:
