@@ -121,12 +121,12 @@ class ChessGame:
 
         # Difficulty settings
         self.difficulty_settings = {
-            "easy": {"skill": 0, "elo": 500},
-            "medium": {"skill": 5, "elo": 1000},
-            "hard": {"skill": 10, "elo": 1500},
-            "master": {"skill": 15, "elo": 2000},
-            "grandmaster": {"skill": 20, "elo": 2500},
-            "stockfish": {"skill": 20, "elo": 3000}
+            "beginner": {"skill": 0, "elo": 1320},  # Minimum allowed ELO
+            "intermediate": {"skill": 5, "elo": 1500},
+            "advanced": {"skill": 10, "elo": 1800},
+            "expert": {"skill": 15, "elo": 2200},
+            "master": {"skill": 18, "elo": 2500},
+            "grandmaster": {"skill": 20, "elo": 3000}
         }
 
         # Initialize game state variables
@@ -134,13 +134,148 @@ class ChessGame:
         self.halfmove_clock = 0
         self.position_counts = {}
 
+        # Main container
+        self.main_container = tk.Frame(self.root, bg='#2C3E50')
+        self.main_container.pack(expand=True, fill='both', padx=20, pady=20)
+
+        # Top control panel
+        self.control_panel = tk.Frame(self.main_container, bg='#2C3E50')
+        self.control_panel.pack(fill='x', pady=(0, 10))
+
+        # Return to menu button
+        self.menu_button = tk.Button(self.control_panel,
+                                     text="Return to Menu",
+                                     command=self.return_to_menu,
+                                     font=('Helvetica', 12),
+                                     bg='#34495E',
+                                     fg='white',
+                                     activebackground='#2C3E50',
+                                     activeforeground='white',
+                                     bd=0,
+                                     cursor='hand2')
+        self.menu_button.pack(side=tk.LEFT, padx=10)
+
+        # Draw button
+        self.draw_button = tk.Button(
+            self.control_panel,
+            text="Offer Draw",
+            command=self.offer_draw,
+            font=('Helvetica', 12),
+            bg='#34495E',
+            fg='white',
+            activebackground='#2C3E50',
+            activeforeground='white',
+            bd=0,
+            cursor='hand2'
+        )
+        self.draw_button.pack(side=tk.LEFT, padx=10)
+
+        # Turn indicator
+        self.turn_label = tk.Label(self.control_panel,
+                                   text="White's turn",
+                                   font=("Helvetica", 16),
+                                   bg='#2C3E50',
+                                   fg='white')
+        self.turn_label.pack(side=tk.LEFT, padx=20)
+
+        # Add difficulty indicator if in single player mode
+        if game_mode == "single_player":
+            self.difficulty_label = tk.Label(
+                self.control_panel,
+                text=f"Difficulty: {difficulty.title()}",
+                font=("Helvetica", 12),
+                bg='#2C3E50',
+                fg='white'
+            )
+            self.difficulty_label.pack(side=tk.LEFT, padx=20)
+
+        # Game area container
+        self.game_area = tk.Frame(self.main_container, bg='#2C3E50')
+        self.game_area.pack(expand=True, fill='both')
+
+        # Evaluation frame on the left
+        self.eval_frame = tk.Frame(self.game_area, bg='#2C3E50', width=100)
+        self.eval_frame.pack(side=tk.LEFT, padx=20, fill='y')
+
+        # Material count labels
+        self.black_material_label = tk.Label(
+            self.eval_frame,
+            text="Black: 0",
+            font=("Helvetica", 14, "bold"),
+            bg='#2C3E50',
+            fg='white'
+        )
+        self.black_material_label.pack(pady=10)
+
+        # Evaluation bar
+        self.eval_canvas = tk.Canvas(
+            self.eval_frame,
+            width=60,
+            height=500,
+            bg='#34495E',
+            highlightthickness=1,
+            highlightbackground='#95A5A6'
+        )
+        self.eval_canvas.pack(pady=10)
+
+        self.white_material_label = tk.Label(
+            self.eval_frame,
+            text="White: 0",
+            font=("Helvetica", 14, "bold"),
+            bg='#2C3E50',
+            fg='white'
+        )
+        self.white_material_label.pack(pady=10)
+
+        # Chess board container
+        self.board_container = tk.Frame(self.game_area, bg='#2C3E50')
+        self.board_container.pack(side=tk.LEFT, expand=True, fill='both')
+
         # Initialize the engine
         self.engine = ChessEngine()
         if game_mode == "single_player" and self.engine.engine:
             self.configure_engine()
 
-        # Create all UI components (same as your existing initialization code)
-        self.initialize_ui()
+        # Add engine controls only for two-player mode
+        if game_mode == "two_player":
+            self.add_engine_controls()
+
+        # Initialize game components
+        self.selected_piece = None
+        self.current_player = "white"
+        self.last_move = None
+        self.board_size = 8
+        self.cell_size = 80
+        self.canvas_size = self.board_size * self.cell_size
+
+        # Initialize piece images
+        self.piece_images = {
+            "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
+            "white_bishop": "♗", "white_queen": "♕", "white_king": "♔",
+            "black_pawn": "♟", "black_rook": "♜", "black_knight": "♞",
+            "black_bishop": "♝", "black_queen": "♛", "black_king": "♚"
+        }
+
+        # Create the chess board canvas
+        self.canvas = tk.Canvas(
+            self.board_container,
+            width=self.canvas_size,
+            height=self.canvas_size,
+            bg='#ECF0F1'
+        )
+        self.canvas.pack(padx=20, pady=20)
+
+        # Initialize the board
+        self.board = [[None for _ in range(self.board_size)] for _ in range(self.board_size)]
+        self.create_pieces()
+        self.draw_board()
+
+        # Bind click event
+        self.canvas.bind('<Button-1>', self.on_square_click)
+
+        # If in single player mode and computer is black, prepare for computer's move
+        if game_mode == "single_player" and self.player_color == "white":
+            self.root.after(1000, self.make_computer_move)
 
     def initialize_ui(self):
         # Main container
@@ -154,13 +289,26 @@ class ChessGame:
     def configure_engine(self):
         """Configure the chess engine based on difficulty settings"""
         try:
-            settings = self.difficulty_settings.get(self.difficulty, self.difficulty_settings["medium"])
+            # Adjusted ELO ratings to work with Stockfish's limits (1320-3190)
+            difficulty_settings = {
+                "beginner": {"skill": 0, "elo": 1320},  # Minimum allowed ELO
+                "intermediate": {"skill": 5, "elo": 1500},
+                "advanced": {"skill": 10, "elo": 1800},
+                "expert": {"skill": 15, "elo": 2200},
+                "master": {"skill": 18, "elo": 2500},
+                "grandmaster": {"skill": 20, "elo": 3000}
+            }
 
-            self.engine.engine.configure({
+            settings = difficulty_settings.get(self.difficulty, difficulty_settings["intermediate"])
+
+            # Configure engine with supported options
+            config = {
                 "Skill Level": settings["skill"],
                 "UCI_LimitStrength": True,
                 "UCI_Elo": settings["elo"]
-            })
+            }
+
+            self.engine.engine.configure(config)
             print(f"Engine configured for {self.difficulty} mode with ELO {settings['elo']}")
         except Exception as e:
             print(f"Error configuring engine: {e}")
@@ -1399,12 +1547,12 @@ class MainMenu:
         }
 
         difficulties = [
-            ("Easy (500 ELO)", "easy", '#27AE60'),
-            ("Medium (1000 ELO)", "medium", '#2980B9'),
-            ("Hard (1500 ELO)", "hard", '#8E44AD'),
-            ("Master (2000 ELO)", "master", '#D35400'),
-            ("Grandmaster (2500 ELO)", "grandmaster", '#C0392B'),
-            ("Stockfish (Max)", "stockfish", '#E74C3C')
+            ("Beginner (1320 ELO)", "beginner", '#27AE60'),
+            ("Intermediate (1500 ELO)", "intermediate", '#2980B9'),
+            ("Advanced (1800 ELO)", "advanced", '#8E44AD'),
+            ("Expert (2200 ELO)", "expert", '#D35400'),
+            ("Master (2500 ELO)", "master", '#C0392B'),
+            ("Grandmaster (3000 ELO)", "grandmaster", '#E74C3C')
         ]
 
         for text, mode, color in difficulties:
