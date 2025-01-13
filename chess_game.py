@@ -20,6 +20,31 @@ class ChessEngine:
 
         self.initialize_engine()
 
+    def configure_engine(self):
+        """Configure the chess engine based on difficulty settings"""
+        try:
+            difficulty_settings = {
+                "easy": {"skill": 0, "elo": 500},
+                "medium": {"skill": 5, "elo": 1000},
+                "hard": {"skill": 10, "elo": 1500},
+                "master": {"skill": 15, "elo": 2000},
+                "grandmaster": {"skill": 20, "elo": 2500},
+                "stockfish": {"skill": 20, "elo": 3000}
+            }
+
+            settings = difficulty_settings.get(self.difficulty, difficulty_settings["medium"])
+
+            # Configure engine with supported options
+            config = {
+                "Skill Level": settings["skill"],
+                "UCI_LimitStrength": True,
+                "UCI_Elo": settings["elo"]
+            }
+
+            self.engine.configure(config)
+            print(f"Engine configured for {self.difficulty} mode with ELO {settings['elo']}")
+        except Exception as e:
+            print(f"Error configuring engine: {e}")
     def initialize_engine(self):
         try:
             if not os.path.exists(self.engine_path):
@@ -38,12 +63,16 @@ class ChessEngine:
                                  f"Could not initialize chess engine.\nError: {str(e)}")
             self.engine = None
 
-    def get_best_move(self, board_fen, time_limit=2.0):
+    def get_best_move(self, board_fen, time_limit=None):
         if not self.engine:
             return None
 
         try:
             board = chess.Board(board_fen)
+            # Use the specified time limit or default based on difficulty
+            if time_limit is None:
+                time_limit = 1.0  # Default to 1 second
+
             result = self.engine.play(
                 board,
                 chess.engine.Limit(time=time_limit)
@@ -78,144 +107,134 @@ class ChessPiece:
 
 
 class ChessGame:
-    def __init__(self, root, main_menu):
+    def __init__(self, root, main_menu, game_mode="two_player", difficulty=None):
         self.root = root
         self.main_menu = main_menu
+        self.game_mode = game_mode
+        self.difficulty = difficulty
         self.root.title("Chess Game")
+
+        # Initialize the engine first
+        self.engine = ChessEngine()
+        if game_mode == "single_player" and self.engine.engine:
+            self.configure_engine()
 
         # Initialize game state variables
         self.move_history = []
         self.halfmove_clock = 0
         self.position_counts = {}
-
-        # Main container
-        self.main_container = tk.Frame(self.root, bg='#2C3E50')
-        self.main_container.pack(expand=True, fill='both', padx=20, pady=20)
-
-        # Top control panel
-        self.control_panel = tk.Frame(self.main_container, bg='#2C3E50')
-        self.control_panel.pack(fill='x', pady=(0, 10))
-
-        # Return to menu button
-        self.menu_button = tk.Button(self.control_panel,
-                                     text="Return to Menu",
-                                     command=self.return_to_menu,
-                                     font=('Helvetica', 12),
-                                     bg='#34495E',
-                                     fg='white',
-                                     activebackground='#2C3E50',
-                                     activeforeground='white',
-                                     bd=0,
-                                     cursor='hand2')
-        self.menu_button.pack(side=tk.LEFT, padx=10)
-
-        # Draw button
-        self.draw_button = tk.Button(
-            self.control_panel,
-            text="Offer Draw",
-            command=self.offer_draw,
-            font=('Helvetica', 12),
-            bg='#34495E',
-            fg='white',
-            activebackground='#2C3E50',
-            activeforeground='white',
-            bd=0,
-            cursor='hand2'
-        )
-        self.draw_button.pack(side=tk.LEFT, padx=10)
-
-        # Turn indicator
-        self.turn_label = tk.Label(self.control_panel,
-                                   text="White's turn",
-                                   font=("Helvetica", 16),
-                                   bg='#2C3E50',
-                                   fg='white')
-        self.turn_label.pack(side=tk.LEFT, padx=20)
-
-        # Game area container
-        self.game_area = tk.Frame(self.main_container, bg='#2C3E50')
-        self.game_area.pack(expand=True, fill='both')
-
-        # Evaluation frame on the left
-        self.eval_frame = tk.Frame(self.game_area, bg='#2C3E50', width=100)
-        self.eval_frame.pack(side=tk.LEFT, padx=20, fill='y')
-
-        # Material count labels
-        self.black_material_label = tk.Label(
-            self.eval_frame,
-            text="Black: 0",
-            font=("Helvetica", 14, "bold"),
-            bg='#2C3E50',
-            fg='white'
-        )
-        self.black_material_label.pack(pady=10)
-
-        # Evaluation bar
-        self.eval_canvas = tk.Canvas(
-            self.eval_frame,
-            width=60,
-            height=500,
-            bg='#34495E',
-            highlightthickness=1,
-            highlightbackground='#95A5A6'
-        )
-        self.eval_canvas.pack(pady=10)
-
-        self.white_material_label = tk.Label(
-            self.eval_frame,
-            text="White: 0",
-            font=("Helvetica", 14, "bold"),
-            bg='#2C3E50',
-            fg='white'
-        )
-        self.white_material_label.pack(pady=10)
-
-        # Chess board container
-        self.board_container = tk.Frame(self.game_area, bg='#2C3E50')
-        self.board_container.pack(side=tk.LEFT, expand=True, fill='both')
-        # Add to existing initialization
-        self.engine = ChessEngine()
         self.engine_thinking = False
+        self.player_color = "white" if game_mode == "single_player" else None
 
-        # Add engine control buttons
-        self.add_engine_controls()
-        # Initialize game components
-        self.selected_piece = None
-        self.current_player = "white"
-        self.last_move = None
-        self.board_size = 8
-        self.cell_size = 80
-        self.canvas_size = self.board_size * self.cell_size
-
-        # Initialize piece images
-        self.piece_images = {
-            "white_pawn": "♙", "white_rook": "♖", "white_knight": "♘",
-            "white_bishop": "♗", "white_queen": "♕", "white_king": "♔",
-            "black_pawn": "♟", "black_rook": "♜", "black_knight": "♞",
-            "black_bishop": "♝", "black_queen": "♛", "black_king": "♚"
-        }
-
-        # Create the chess board canvas
-        self.canvas = tk.Canvas(
-            self.board_container,
-            width=self.canvas_size,
-            height=self.canvas_size,
-            bg='#ECF0F1'
-        )
-        self.canvas.pack(padx=20, pady=20)
+        # Create UI components
+        self.create_ui()
 
         # Initialize the board
         self.board = [[None for _ in range(self.board_size)] for _ in range(self.board_size)]
         self.create_pieces()
         self.draw_board()
 
+        # Add engine controls only for two-player mode
+        if game_mode == "two_player":
+            self.add_engine_controls()
+
         # Bind click event
         self.canvas.bind('<Button-1>', self.on_square_click)
 
+        # If in single player mode and computer is black, make first move
+        if game_mode == "single_player" and self.player_color == "white":
+            self.root.after(1000, self.make_computer_move)
 
-        self.move_history = []  # Store positions for threefold repetition
-        self.halfmove_clock = 0  # For fifty-move rule
-        self.position_counts = {}  # For tracking repeated positions
+    def configure_engine(self):
+        """Configure the chess engine based on difficulty settings"""
+        try:
+            settings = self.difficulty_settings.get(self.difficulty, self.difficulty_settings["medium"])
+            self.engine.engine.configure({
+                "Skill Level": settings["skill"],
+                "Minimum Thinking Time": int(settings["time"] * 1000),  # Convert to milliseconds
+                "Slow Mover": 100
+            })
+            print(f"Engine configured for {self.difficulty} mode")
+        except Exception as e:
+            print(f"Error configuring engine: {e}")
+
+    def make_computer_move(self):
+        """Handle computer's move in single player mode"""
+        if self.game_mode != "single_player" or self.engine_thinking:
+            return
+
+        if self.current_player != self.player_color:
+            self.engine_thinking = True
+
+            def engine_think():
+                try:
+                    # Get current position FEN
+                    fen = self.board_to_fen()
+                    settings = self.difficulty_settings.get(self.difficulty, self.difficulty_settings["medium"])
+
+                    # Get engine's move
+                    move = self.engine.get_best_move(fen, time_limit=settings["time"])
+
+                    if move:
+                        # Convert move to board coordinates
+                        start_square = chess.square_name(move.from_square)
+                        end_square = chess.square_name(move.to_square)
+
+                        # Convert algebraic notation to board coordinates
+                        start_col = ord(start_square[0]) - ord('a')
+                        start_row = 8 - int(start_square[1])
+                        end_col = ord(end_square[0]) - ord('a')
+                        end_row = 8 - int(end_square[1])
+
+                        # Make the move
+                        self.root.after(0, lambda: self.make_move(
+                            (start_row, start_col), (end_row, end_col)))
+
+                finally:
+                    self.engine_thinking = False
+
+            # Run engine analysis in separate thread
+            threading.Thread(target=engine_think, daemon=True).start()
+
+    def make_move(self, start, end):
+        """Execute a move and handle the aftermath"""
+        if self.is_valid_move(start, end):
+            self.move_piece(start, end)
+
+            # Switch turns
+            opposite_color = "black" if self.current_player == "white" else "white"
+            if self.is_checkmate(opposite_color):
+                self.game_over(self.current_player)
+            else:
+                self.current_player = opposite_color
+                self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+
+                # If in single player mode and it's computer's turn, make computer move
+                if self.game_mode == "single_player" and self.current_player != self.player_color:
+                    self.root.after(500, self.make_computer_move)  # Add slight delay for better UX
+
+            self.selected_piece = None
+            self.draw_board()
+            self.update_evaluation_display()
+
+    def on_square_click(self, event):
+        """Handle square clicks, modified for single player mode"""
+        try:
+            # If it's computer's turn in single player mode, ignore clicks
+            if (self.game_mode == "single_player" and
+                    self.current_player != self.player_color):
+                return
+
+            # [Rest of your existing on_square_click code...]
+
+            # After making a move, trigger computer's move if needed
+            if self.game_mode == "single_player" and self.current_player != self.player_color:
+                self.root.after(500, self.make_computer_move)
+
+        except Exception as e:
+            print(f"Error in on_square_click: {e}")
+            self.selected_piece = None
+            self.draw_board()
 
     def load_pieces(self):
         piece_files = {
@@ -243,21 +262,46 @@ class ChessGame:
         # Update evaluation after creating pieces
         self.update_evaluation_display()
 
+    def configure_engine_difficulty(self):
+        # Initialize engine with appropriate settings
+        skill_levels = {
+            "easy": {"skill": 0, "depth": 1, "time": 0.1},
+            "medium": {"skill": 5, "depth": 5, "time": 0.2},
+            "hard": {"skill": 10, "depth": 10, "time": 0.3},
+            "master": {"skill": 15, "depth": 15, "time": 0.5},
+            "grandmaster": {"skill": 20, "depth": 20, "time": 0.7},
+            "stockfish": {"skill": 20, "depth": 20, "time": 1.0}
+        }
+
+        settings = skill_levels.get(self.difficulty, skill_levels["medium"])
+
+        try:
+            if self.engine and self.engine.engine:
+                self.engine.engine.configure({
+                    "Skill Level": settings["skill"],
+                    "Minimum Thinking Time": int(settings["time"] * 1000),  # Convert to milliseconds
+                    "Slow Mover": 100,  # Normal speed
+                })
+                print(f"Engine configured for {self.difficulty} mode")
+        except Exception as e:
+            print(f"Error configuring engine: {e}")
+
     def add_engine_controls(self):
-        # Add to control panel
-        self.engine_button = tk.Button(
-            self.control_panel,
-            text="Get Engine Move",
-            command=self.get_engine_move,
-            font=('Helvetica', 12),
-            bg='#34495E',
-            fg='white',
-            activebackground='#2C3E50',
-            activeforeground='white',
-            bd=0,
-            cursor='hand2'
-        )
-        self.engine_button.pack(side=tk.LEFT, padx=10)
+        """Add engine control buttons only in two-player mode"""
+        if self.game_mode == "two_player":
+            self.engine_button = tk.Button(
+                self.control_panel,
+                text="Get Engine Move",
+                command=self.get_engine_move,
+                font=('Helvetica', 12),
+                bg='#34495E',
+                fg='white',
+                activebackground='#2C3E50',
+                activeforeground='white',
+                bd=0,
+                cursor='hand2'
+            )
+            self.engine_button.pack(side=tk.LEFT, padx=10)
 
     def board_to_fen(self):
         """Convert current board position to FEN string"""
@@ -737,70 +781,6 @@ class ChessGame:
             cursor='hand2'
         )
         self.draw_button.pack(side=tk.LEFT, padx=10)
-
-    def on_square_click(self, event):
-        try:
-            col = event.x // self.cell_size
-            row = event.y // self.cell_size
-
-            # Validate coordinates
-            if not (0 <= row < self.board_size and 0 <= col < self.board_size):
-                return
-
-            # First click - Selecting a piece
-            if self.selected_piece is None:
-                piece = self.board[row][col]
-                # Can only select pieces of current player's color
-                if piece and piece.color == self.current_player:
-                    self.selected_piece = (row, col)
-                    self.draw_board()
-                return
-
-            # Second click - Moving the piece
-            start_row, start_col = self.selected_piece
-
-            # If clicking the same square, deselect the piece
-            if row == start_row and col == start_col:
-                self.selected_piece = None
-                self.draw_board()
-                return
-
-            # If clicking another piece of same color, switch selection
-            piece = self.board[row][col]
-            if piece and piece.color == self.current_player:
-                self.selected_piece = (row, col)
-                self.draw_board()
-                return
-
-            # Attempt to move the piece
-            if self.is_valid_move(self.selected_piece, (row, col)):
-                # Make the move
-                self.move_piece(self.selected_piece, (row, col))
-
-                # Check for checkmate
-                opposite_color = "black" if self.current_player == "white" else "white"
-                if self.is_checkmate(opposite_color):
-                    self.game_over(self.current_player)
-                else:
-                    # If no checkmate, switch turns
-                    self.current_player = opposite_color
-                    self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
-
-                # Reset selection
-                self.selected_piece = None
-                self.draw_board()
-
-                # Update evaluation
-                self.update_evaluation_display()
-            else:
-                # Invalid move, just deselect the piece
-                self.selected_piece = None
-                self.draw_board()
-
-        except Exception as e:
-            print(f"Error in on_square_click: {e}")
-            self.selected_piece = None
-            self.draw_board()
 
     def is_checkmate(self, color):
         if not self.is_in_check(color):
@@ -1381,6 +1361,59 @@ class MainMenu:
                             bg='#2C3E50')
         subtitle.pack(pady=10)
 
+    def show_difficulty_selection(self):
+        # Create difficulty selection window
+        difficulty_window = tk.Toplevel(self.root)
+        difficulty_window.title("Select Difficulty")
+        difficulty_window.geometry("400x500")
+        difficulty_window.configure(bg='#2C3E50')
+        difficulty_window.transient(self.root)
+        difficulty_window.grab_set()
+
+        # Center the window
+        difficulty_window.geometry("+%d+%d" % (
+            self.root.winfo_rootx() + 200,
+            self.root.winfo_rooty() + 50))
+
+        # Title
+        tk.Label(difficulty_window,
+                 text="Select Difficulty",
+                 font=('Helvetica', 24, 'bold'),
+                 fg='white',
+                 bg='#2C3E50').pack(pady=20)
+
+        # Difficulty buttons style
+        button_style = {
+            'font': ('Helvetica', 14),
+            'width': 15,
+            'height': 1,
+            'bd': 0,
+            'cursor': 'hand2'
+        }
+
+        difficulties = [
+            ("Easy (500 ELO)", "easy", '#27AE60'),
+            ("Medium (1000 ELO)", "medium", '#2980B9'),
+            ("Hard (1500 ELO)", "hard", '#8E44AD'),
+            ("Master (2000 ELO)", "master", '#D35400'),
+            ("Grandmaster (2500 ELO)", "grandmaster", '#C0392B'),
+            ("Stockfish (Max)", "stockfish", '#E74C3C')
+        ]
+
+        for text, mode, color in difficulties:
+            btn = tk.Button(difficulty_window,
+                            text=text,
+                            command=lambda m=mode: self.start_game(game_mode="single_player",
+                                                                   difficulty=m),
+                            bg=color,
+                            fg='white',
+                            activebackground=color,
+                            activeforeground='white',
+                            **button_style)
+            btn.pack(pady=10)
+            btn.bind('<Enter>', self.on_enter)
+            btn.bind('<Leave>', self.on_leave)
+
     def create_buttons(self):
         # Buttons Frame
         button_frame = tk.Frame(self.main_frame, bg='#2C3E50')
@@ -1395,16 +1428,27 @@ class MainMenu:
             'cursor': 'hand2'
         }
 
-        # Play Button
-        self.play_button = tk.Button(button_frame,
-                                     text="Play Game",
-                                     command=self.start_game,
-                                     bg='#27AE60',  # Green
-                                     fg='white',
-                                     activebackground='#2ECC71',
-                                     activeforeground='white',
-                                     **button_style)
-        self.play_button.pack(pady=10)
+        # Two Player Button
+        self.two_player_button = tk.Button(button_frame,
+                                           text="Two Players",
+                                           command=lambda: self.start_game(game_mode="two_player"),
+                                           bg='#27AE60',  # Green
+                                           fg='white',
+                                           activebackground='#2ECC71',
+                                           activeforeground='white',
+                                           **button_style)
+        self.two_player_button.pack(pady=10)
+
+        # Single Player Button
+        self.single_player_button = tk.Button(button_frame,
+                                              text="Single Player",
+                                              command=self.show_difficulty_selection,
+                                              bg='#3498DB',  # Blue
+                                              fg='white',
+                                              activebackground='#2980B9',
+                                              activeforeground='white',
+                                              **button_style)
+        self.single_player_button.pack(pady=10)
 
         # Quit Button
         self.quit_button = tk.Button(button_frame,
@@ -1418,7 +1462,7 @@ class MainMenu:
         self.quit_button.pack(pady=10)
 
         # Add hover effects
-        for button in (self.play_button, self.quit_button):
+        for button in (self.two_player_button, self.single_player_button, self.quit_button):
             button.bind('<Enter>', self.on_enter)
             button.bind('<Leave>', self.on_leave)
 
@@ -1441,16 +1485,16 @@ class MainMenu:
     def on_leave(self, e):
         e.widget.config(relief='flat')
 
-    def start_game(self):
+    def start_game(self, game_mode="two_player", difficulty=None):
         self.root.withdraw()  # Hide main menu
         self.game_window = tk.Toplevel(self.root)
         self.game_window.title("Chess Game")
-        self.game_window.geometry("1200x900")  # Increased window size
+        self.game_window.geometry("1200x900")
         self.game_window.configure(bg='#2C3E50')
-        self.game_window.resizable(False, False)  # Prevent window resizing
+        self.game_window.resizable(False, False)
 
-        # Create and start the game
-        chess_game = ChessGame(self.game_window, self)
+        # Create and start the game with the specified mode and difficulty
+        self.current_game = ChessGame(self.game_window, self, game_mode, difficulty)
 
 
     def show_menu(self):
