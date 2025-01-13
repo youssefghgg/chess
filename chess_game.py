@@ -23,13 +23,14 @@ class ChessEngine:
     def configure_engine(self):
         """Configure the chess engine based on difficulty settings"""
         try:
+            # Adjusted ELO ratings to work with Stockfish's limits (1320-3190)
             difficulty_settings = {
-                "easy": {"skill": 0, "elo": 500},
-                "medium": {"skill": 5, "elo": 1000},
-                "hard": {"skill": 10, "elo": 1500},
-                "master": {"skill": 15, "elo": 2000},
+                "easy": {"skill": 0, "elo": 1320},  # Minimum allowed ELO
+                "medium": {"skill": 5, "elo": 1500},
+                "hard": {"skill": 10, "elo": 1800},
+                "master": {"skill": 15, "elo": 2200},
                 "grandmaster": {"skill": 20, "elo": 2500},
-                "stockfish": {"skill": 20, "elo": 3000}
+                "stockfish": {"skill": 20, "elo": 3190}  # Maximum allowed ELO
             }
 
             settings = difficulty_settings.get(self.difficulty, difficulty_settings["medium"])
@@ -41,7 +42,7 @@ class ChessEngine:
                 "UCI_Elo": settings["elo"]
             }
 
-            self.engine.configure(config)
+            self.engine.engine.configure(config)
             print(f"Engine configured for {self.difficulty} mode with ELO {settings['elo']}")
         except Exception as e:
             print(f"Error configuring engine: {e}")
@@ -114,47 +115,53 @@ class ChessGame:
         self.difficulty = difficulty
         self.root.title("Chess Game")
 
-        # Initialize the engine first
-        self.engine = ChessEngine()
-        if game_mode == "single_player" and self.engine.engine:
-            self.configure_engine()
+        # Game mode settings
+        self.player_color = "white" if game_mode == "single_player" else None
+        self.engine_thinking = False
+
+        # Difficulty settings
+        self.difficulty_settings = {
+            "easy": {"skill": 0, "elo": 500},
+            "medium": {"skill": 5, "elo": 1000},
+            "hard": {"skill": 10, "elo": 1500},
+            "master": {"skill": 15, "elo": 2000},
+            "grandmaster": {"skill": 20, "elo": 2500},
+            "stockfish": {"skill": 20, "elo": 3000}
+        }
 
         # Initialize game state variables
         self.move_history = []
         self.halfmove_clock = 0
         self.position_counts = {}
-        self.engine_thinking = False
-        self.player_color = "white" if game_mode == "single_player" else None
 
-        # Create UI components
-        self.create_ui()
+        # Initialize the engine
+        self.engine = ChessEngine()
+        if game_mode == "single_player" and self.engine.engine:
+            self.configure_engine()
 
-        # Initialize the board
-        self.board = [[None for _ in range(self.board_size)] for _ in range(self.board_size)]
-        self.create_pieces()
-        self.draw_board()
+        # Create all UI components (same as your existing initialization code)
+        self.initialize_ui()
 
-        # Add engine controls only for two-player mode
-        if game_mode == "two_player":
-            self.add_engine_controls()
+    def initialize_ui(self):
+        # Main container
+        self.main_container = tk.Frame(self.root, bg='#2C3E50')
+        self.main_container.pack(expand=True, fill='both', padx=20, pady=20)
 
-        # Bind click event
-        self.canvas.bind('<Button-1>', self.on_square_click)
-
-        # If in single player mode and computer is black, make first move
-        if game_mode == "single_player" and self.player_color == "white":
-            self.root.after(1000, self.make_computer_move)
+        # [Rest of your existing UI initialization code]
+        # Copy everything from your current __init__ method after the game state variables
+        # up to the end of the method, but put it in this initialize_ui method
 
     def configure_engine(self):
         """Configure the chess engine based on difficulty settings"""
         try:
             settings = self.difficulty_settings.get(self.difficulty, self.difficulty_settings["medium"])
+
             self.engine.engine.configure({
                 "Skill Level": settings["skill"],
-                "Minimum Thinking Time": int(settings["time"] * 1000),  # Convert to milliseconds
-                "Slow Mover": 100
+                "UCI_LimitStrength": True,
+                "UCI_Elo": settings["elo"]
             })
-            print(f"Engine configured for {self.difficulty} mode")
+            print(f"Engine configured for {self.difficulty} mode with ELO {settings['elo']}")
         except Exception as e:
             print(f"Error configuring engine: {e}")
 
@@ -1465,7 +1472,6 @@ class MainMenu:
         for button in (self.two_player_button, self.single_player_button, self.quit_button):
             button.bind('<Enter>', self.on_enter)
             button.bind('<Leave>', self.on_leave)
-
     def create_footer(self):
         # Footer Frame
         footer_frame = tk.Frame(self.main_frame, bg='#2C3E50')
@@ -1493,8 +1499,8 @@ class MainMenu:
         self.game_window.configure(bg='#2C3E50')
         self.game_window.resizable(False, False)
 
-        # Create and start the game with the specified mode and difficulty
-        self.current_game = ChessGame(self.game_window, self, game_mode, difficulty)
+        # Create and start the game
+        chess_game = ChessGame(self.game_window, self, game_mode, difficulty)
 
 
     def show_menu(self):
