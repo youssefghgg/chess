@@ -501,13 +501,6 @@ class ChessGame:
         start_row, start_col = start
         end_row, end_col = end
         piece = self.board[start_row][start_col]
-        target = self.board[end_row][end_col]
-
-        # Update halfmove clock
-        if piece.name == 'pawn' or target:
-            self.halfmove_clock = 0
-        else:
-            self.halfmove_clock += 1
 
         # Store last move
         self.last_move = (start, end)
@@ -540,9 +533,6 @@ class ChessGame:
         if piece.name == "pawn" and abs(start_row - end_row) == 2:
             piece.en_passant_vulnerable = True
 
-        # Store current position before the move for threefold repetition check
-        position_before = self.get_position_string()
-
         # Move piece
         self.board[end_row][end_col] = piece
         self.board[start_row][start_col] = None
@@ -554,42 +544,8 @@ class ChessGame:
                     (piece.color == "black" and end_row == 7):
                 self.promote_pawn(end_row, end_col)
 
-        # Add new position to history
-        new_position = self.get_position_string()
-        self.position_counts[new_position] = self.position_counts.get(new_position, 0) + 1
-
-        # Check for checkmate on the opponent
-        opponent_color = "black" if piece.color == "white" else "white"
-        if self.is_checkmate(opponent_color):
-            self.game_over(piece.color)
-            return
-
-        # Check for draws
-        if self.is_stalemate(opponent_color):
-            self.draw_game("Stalemate")
-            return
-        if self.is_insufficient_material():
-            self.draw_game("Insufficient Material")
-            return
-        if self.is_threefold_repetition():
-            self.draw_game("Threefold Repetition")
-            return
-        if self.is_fifty_move_rule():
-            self.draw_game("Fifty-Move Rule")
-            return
-        if self.is_dead_position():
-            self.draw_game("Dead Position")
-            return
-
         # Update evaluation immediately after the move
         self.update_evaluation_display()
-
-        # Switch players
-        self.current_player = opponent_color
-        self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
-
-        # Update the board display
-        self.draw_board()
 
     def add_draw_button(self):
         """Add draw offer button to control panel"""
@@ -616,22 +572,56 @@ class ChessGame:
             if not (0 <= row < self.board_size and 0 <= col < self.board_size):
                 return
 
+            # First click - Selecting a piece
             if self.selected_piece is None:
-                # Select piece
                 piece = self.board[row][col]
+                # Can only select pieces of current player's color
                 if piece and piece.color == self.current_player:
                     self.selected_piece = (row, col)
                     self.draw_board()
-            else:
-                # Move piece if valid
-                if self.is_valid_move(self.selected_piece, (row, col)):
-                    self.move_piece(self.selected_piece, (row, col))
-                    # Switch players only if game isn't over
-                    if not self.is_checkmate("white") and not self.is_checkmate("black"):
-                        self.current_player = "black" if self.current_player == "white" else "white"
-                        self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+                return
+
+            # Second click - Moving the piece
+            start_row, start_col = self.selected_piece
+
+            # If clicking the same square, deselect the piece
+            if row == start_row and col == start_col:
                 self.selected_piece = None
                 self.draw_board()
+                return
+
+            # If clicking another piece of same color, switch selection
+            piece = self.board[row][col]
+            if piece and piece.color == self.current_player:
+                self.selected_piece = (row, col)
+                self.draw_board()
+                return
+
+            # Attempt to move the piece
+            if self.is_valid_move(self.selected_piece, (row, col)):
+                # Make the move
+                self.move_piece(self.selected_piece, (row, col))
+
+                # Check for checkmate
+                opposite_color = "black" if self.current_player == "white" else "white"
+                if self.is_checkmate(opposite_color):
+                    self.game_over(self.current_player)
+                else:
+                    # If no checkmate, switch turns
+                    self.current_player = opposite_color
+                    self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+
+                # Reset selection
+                self.selected_piece = None
+                self.draw_board()
+
+                # Update evaluation
+                self.update_evaluation_display()
+            else:
+                # Invalid move, just deselect the piece
+                self.selected_piece = None
+                self.draw_board()
+
         except Exception as e:
             print(f"Error in on_square_click: {e}")
             self.selected_piece = None
