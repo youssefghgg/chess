@@ -1,7 +1,57 @@
 import tkinter as tk
 from tkinter import messagebox
+from chess import engine
+import threading
+import os
 
 
+class ChessEngine:
+    def __init__(self, depth=20):
+        self.depth = depth
+        self.engine = None
+        self.engine_path = r"C:\Users\Youssef Ahmed\PycharmProjects\pythonProject2\chess\stockfish\stockfish-windows-x86-64-sse41-popcnt"
+        self.initialize_engine()
+
+    def initialize_engine(self):
+        try:
+            self.engine = chess.engine.SimpleEngine.popen_uci(self.engine_path)
+            # Set engine options if needed
+            # self.engine.configure({"Threads": 4, "Hash": 128})
+        except Exception as e:
+            print(f"Error initializing engine: {e}")
+            self.engine = None
+
+    def get_best_move(self, board_fen, time_limit=2.0):
+        if not self.engine:
+            return None
+
+        try:
+            board = chess.Board(board_fen)
+            result = self.engine.play(
+                board,
+                chess.engine.Limit(time=time_limit)
+            )
+            return result.move
+        except Exception as e:
+            print(f"Error getting best move: {e}")
+            return None
+
+    def get_position_evaluation(self, board_fen):
+        if not self.engine:
+            return None
+
+        try:
+            board = chess.Board(board_fen)
+            info = self.engine.analyse(board, chess.engine.Limit(depth=self.depth))
+            score = info["score"].relative.score()
+            return score / 100  # Convert centipawns to pawns
+        except Exception as e:
+            print(f"Error getting evaluation: {e}")
+            return None
+
+    def close(self):
+        if self.engine:
+            self.engine.quit()
 class ChessPiece:
     def __init__(self, color, name):
         self.color = color
@@ -106,7 +156,12 @@ class ChessGame:
         # Chess board container
         self.board_container = tk.Frame(self.game_area, bg='#2C3E50')
         self.board_container.pack(side=tk.LEFT, expand=True, fill='both')
+        # Add to existing initialization
+        self.engine = ChessEngine()
+        self.engine_thinking = False
 
+        # Add engine control buttons
+        self.add_engine_controls()
         # Initialize game components
         self.selected_piece = None
         self.current_player = "white"
@@ -170,6 +225,109 @@ class ChessGame:
             self.board[7][col] = ChessPiece("white", piece_name)  # Changed to white
         # Update evaluation after creating pieces
         self.update_evaluation_display()
+
+    def add_engine_controls(self):
+        # Add to control panel
+        self.engine_button = tk.Button(
+            self.control_panel,
+            text="Get Engine Move",
+            command=self.get_engine_move,
+            font=('Helvetica', 12),
+            bg='#34495E',
+            fg='white',
+            activebackground='#2C3E50',
+            activeforeground='white',
+            bd=0,
+            cursor='hand2'
+        )
+        self.engine_button.pack(side=tk.LEFT, padx=10)
+
+    def board_to_fen(self):
+        """Convert current board position to FEN string"""
+        fen = []
+        for row in range(self.board_size):
+            empty = 0
+            row_fen = ''
+            for col in range(self.board_size):
+                piece = self.board[row][col]
+                if piece is None:
+                    empty += 1
+                else:
+                    if empty > 0:
+                        row_fen += str(empty)
+                        empty = 0
+                    # Convert piece to FEN notation
+                    symbol = piece.name[0].upper() if piece.name != 'knight' else 'N'
+                    if piece.color == 'black':
+                        symbol = symbol.lower()
+                    row_fen += symbol
+            if empty > 0:
+                row_fen += str(empty)
+            fen.append(row_fen)
+
+        # Join rows and add other FEN components
+        fen_str = '/'.join(fen)
+        fen_str += f" {'w' if self.current_player == 'white' else 'b'} KQkq - 0 1"
+        return fen_str
+
+    def get_engine_move(self):
+        if self.engine_thinking:
+            return
+
+        self.engine_thinking = True
+        self.engine_button.config(state='disabled')
+
+        def engine_think():
+            try:
+                # Get current position FEN
+                fen = self.board_to_fen()
+
+                # Get engine's move
+                move = self.engine.get_best_move(fen)
+
+                if move:
+                    # Convert move to board coordinates
+                    start_square = chess.square_name(move.from_square)
+                    end_square = chess.square_name(move.to_square)
+
+                    # Convert algebraic notation to board coordinates
+                    start_col = ord(start_square[0]) - ord('a')
+                    start_row = 8 - int(start_square[1])
+                    end_col = ord(end_square[0]) - ord('a')
+                    end_row = 8 - int(end_square[1])
+
+                    # Make the move
+                    self.root.after(0, lambda: self.make_engine_move(
+                        (start_row, start_col), (end_row, end_col)))
+
+            finally:
+                self.engine_thinking = False
+                self.root.after(0, lambda: self.engine_button.config(state='normal'))
+
+        # Run engine analysis in separate thread
+        threading.Thread(target=engine_think, daemon=True).start()
+
+    def make_engine_move(self, start, end):
+        """Execute the engine's move"""
+        if self.is_valid_move(start, end):
+            self.move_piece(start, end)
+
+            # Switch turns
+            opposite_color = "black" if self.current_player == "white" else "white"
+            if self.is_checkmate(opposite_color):
+                self.game_over(self.current_player)
+            else:
+                self.current_player = opposite_color
+                self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+
+            self.selected_piece = None
+            self.draw_board()
+            self.update_evaluation_display()
+
+    def __del__(self):
+        # Clean up engine when game is closed
+        if hasattr(self, 'engine'):
+            self.engine.close()
 
     def is_draw(self):
         """Check all draw conditions"""
