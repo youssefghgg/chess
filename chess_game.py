@@ -264,7 +264,7 @@ class ChessGame:
             bg='#ECF0F1'
         )
         self.canvas.pack(padx=20, pady=20)
-
+        self.canvas.bind('<Button-1>', self.on_square_click)
         # Initialize the board
         self.board = [[None for _ in range(self.board_size)] for _ in range(self.board_size)]
         self.create_pieces()
@@ -375,16 +375,65 @@ class ChessGame:
     def on_square_click(self, event):
         """Handle square clicks, modified for single player mode"""
         try:
+            col = event.x // self.cell_size
+            row = event.y // self.cell_size
+
             # If it's computer's turn in single player mode, ignore clicks
             if (self.game_mode == "single_player" and
                     self.current_player != self.player_color):
                 return
 
-            # [Rest of your existing on_square_click code...]
+            # Validate coordinates
+            if not (0 <= row < self.board_size and 0 <= col < self.board_size):
+                return
 
-            # After making a move, trigger computer's move if needed
-            if self.game_mode == "single_player" and self.current_player != self.player_color:
-                self.root.after(500, self.make_computer_move)
+            # First click - Selecting a piece
+            if self.selected_piece is None:
+                piece = self.board[row][col]
+                # Can only select pieces of current player's color
+                if piece and piece.color == self.current_player:
+                    self.selected_piece = (row, col)
+                    self.draw_board()
+                return
+
+            # Second click - Moving the piece
+            start_row, start_col = self.selected_piece
+
+            # If clicking the same square, deselect the piece
+            if row == start_row and col == start_col:
+                self.selected_piece = None
+                self.draw_board()
+                return
+
+            # If clicking another piece of same color, switch selection
+            piece = self.board[row][col]
+            if piece and piece.color == self.current_player:
+                self.selected_piece = (row, col)
+                self.draw_board()
+                return
+
+            # Attempt to move the piece
+            if self.is_valid_move(self.selected_piece, (row, col)):
+                # Make the move
+                self.move_piece(self.selected_piece, (row, col))
+
+                # Check for checkmate
+                opposite_color = "black" if self.current_player == "white" else "white"
+                if self.is_checkmate(opposite_color):
+                    self.game_over(self.current_player)
+                else:
+                    # If no checkmate, switch turns
+                    self.current_player = opposite_color
+                    self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
+
+                    # If in single player mode and it's computer's turn, make computer move
+                    if self.game_mode == "single_player" and self.current_player != self.player_color:
+                        self.root.after(500, self.make_computer_move)
+
+                # Reset selection
+                self.selected_piece = None
+                self.draw_board()
+                self.update_evaluation_display()
 
         except Exception as e:
             print(f"Error in on_square_click: {e}")
@@ -672,13 +721,24 @@ class ChessGame:
 
     def offer_draw(self):
         """Handle draw offers"""
-        response = messagebox.askyesno(
-            "Draw Offer",
-            f"{self.current_player.capitalize()} offers a draw.\nDoes {('Black' if self.current_player == 'white' else 'White')} accept?",
-            parent=self.root
-        )
-        if response:
-            self.draw_game("Draw by Agreement")
+        if self.game_mode == "single_player":
+            # For single player, make the computer's decision based on evaluation
+            eval_score = self.evaluate_position()
+            computer_accepts = abs(eval_score) < 0.5  # Accept if position is roughly equal
+
+            if computer_accepts:
+                self.draw_game("Draw by Agreement")
+            else:
+                messagebox.showinfo("Draw Declined", "Computer declines draw offer")
+        else:
+            # For two player mode
+            response = messagebox.askyesno(
+                "Draw Offer",
+                f"{self.current_player.capitalize()} offers a draw.\nDoes {('Black' if self.current_player == 'white' else 'White')} accept?",
+                parent=self.root
+            )
+            if response:
+                self.draw_game("Draw by Agreement")
 
     def is_checkmate(self, color):
         """
@@ -937,10 +997,6 @@ class ChessGame:
         )
         self.draw_button.pack(side=tk.LEFT, padx=10)
 
-    def is_checkmate(self, color):
-        if not self.is_in_check(color):
-            return False
-        return not self.has_valid_moves(color)
 
     def is_stalemate(self, color):
         if self.is_in_check(color):
@@ -1476,6 +1532,13 @@ class ChessGame:
     def undo_move(self):
         # Implement move history and undo functionality
         pass
+
+    def return_to_menu(self):
+        """Return to the main menu"""
+        if hasattr(self, 'engine'):
+            self.engine.close()  # Clean up engine
+        self.root.destroy()  # Close game window
+        self.main_menu.root.deiconify()  # Show main menu
 
 
 class MainMenu:
