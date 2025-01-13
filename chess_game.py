@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
-from chess import engine
+import chess
+import chess.engine
 import threading
 import os
 
@@ -9,16 +10,32 @@ class ChessEngine:
     def __init__(self, depth=20):
         self.depth = depth
         self.engine = None
-        self.engine_path = r"C:\Users\Youssef Ahmed\PycharmProjects\pythonProject2\chess\stockfish\stockfish-windows-x86-64-sse41-popcnt"
+
+        # Get the directory where the script is located
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Use the exact executable name
+        self.engine_path = os.path.join(current_dir, "stockfish",
+                                        "stockfish-windows-x86-64-sse41-popcnt.exe")
+
         self.initialize_engine()
 
     def initialize_engine(self):
         try:
+            if not os.path.exists(self.engine_path):
+                raise FileNotFoundError(
+                    f"Stockfish engine not found at: {self.engine_path}\n"
+                    f"Current directory: {os.path.dirname(os.path.abspath(__file__))}"
+                )
+
+            print(f"Attempting to initialize engine at: {self.engine_path}")
             self.engine = chess.engine.SimpleEngine.popen_uci(self.engine_path)
-            # Set engine options if needed
-            # self.engine.configure({"Threads": 4, "Hash": 128})
+            print("Chess engine initialized successfully")
+
         except Exception as e:
             print(f"Error initializing engine: {e}")
+            messagebox.showerror("Engine Error",
+                                 f"Could not initialize chess engine.\nError: {str(e)}")
             self.engine = None
 
     def get_best_move(self, board_fen, time_limit=2.0):
