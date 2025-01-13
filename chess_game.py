@@ -97,8 +97,14 @@ class ChessEngine:
             return None
 
     def close(self):
+        """Safely close the engine"""
         if self.engine:
-            self.engine.quit()
+            try:
+                self.engine.quit()
+            except Exception as e:
+                print(f"Warning: Error quitting engine: {e}")
+            finally:
+                self.engine = None
 class ChessPiece:
     def __init__(self, color, name):
         self.color = color
@@ -119,14 +125,14 @@ class ChessGame:
         self.player_color = "white" if game_mode == "single_player" else None
         self.engine_thinking = False
 
-        # Difficulty settings
+
         self.difficulty_settings = {
-            "beginner": {"skill": 0, "elo": 1320},  # Minimum allowed ELO
-            "intermediate": {"skill": 5, "elo": 1500},
-            "advanced": {"skill": 10, "elo": 1800},
-            "expert": {"skill": 15, "elo": 2200},
-            "master": {"skill": 18, "elo": 2500},
-            "grandmaster": {"skill": 20, "elo": 3000}
+            "beginner": {"skill": 0, "elo": 1320, "time": 0.1},
+            "intermediate": {"skill": 5, "elo": 1500, "time": 0.2},
+            "advanced": {"skill": 10, "elo": 1800, "time": 0.3},
+            "expert": {"skill": 15, "elo": 2200, "time": 0.5},
+            "master": {"skill": 18, "elo": 2500, "time": 0.7},
+            "grandmaster": {"skill": 20, "elo": 3000, "time": 1.0}
         }
 
         # Initialize game state variables
@@ -289,17 +295,11 @@ class ChessGame:
     def configure_engine(self):
         """Configure the chess engine based on difficulty settings"""
         try:
-            # Adjusted ELO ratings to work with Stockfish's limits (1320-3190)
-            difficulty_settings = {
-                "beginner": {"skill": 0, "elo": 1320},  # Minimum allowed ELO
-                "intermediate": {"skill": 5, "elo": 1500},
-                "advanced": {"skill": 10, "elo": 1800},
-                "expert": {"skill": 15, "elo": 2200},
-                "master": {"skill": 18, "elo": 2500},
-                "grandmaster": {"skill": 20, "elo": 3000}
-            }
-
-            settings = difficulty_settings.get(self.difficulty, difficulty_settings["intermediate"])
+            # Get settings for current difficulty
+            settings = self.difficulty_settings.get(self.difficulty)
+            if settings is None:
+                print(f"Unknown difficulty: {self.difficulty}")
+                return
 
             # Configure engine with supported options
             config = {
@@ -325,10 +325,9 @@ class ChessGame:
                 try:
                     # Get current position FEN
                     fen = self.board_to_fen()
-                    settings = self.difficulty_settings.get(self.difficulty, self.difficulty_settings["medium"])
 
                     # Get engine's move
-                    move = self.engine.get_best_move(fen, time_limit=settings["time"])
+                    move = self.engine.get_best_move(fen)
 
                     if move:
                         # Convert move to board coordinates
@@ -341,10 +340,12 @@ class ChessGame:
                         end_col = ord(end_square[0]) - ord('a')
                         end_row = 8 - int(end_square[1])
 
-                        # Make the move
+                        # Make the move on the main thread
                         self.root.after(0, lambda: self.make_move(
                             (start_row, start_col), (end_row, end_col)))
 
+                except Exception as e:
+                    print(f"Error in computer move: {e}")
                 finally:
                     self.engine_thinking = False
 
@@ -366,14 +367,14 @@ class ChessGame:
 
                 # If in single player mode and it's computer's turn, make computer move
                 if self.game_mode == "single_player" and self.current_player != self.player_color:
-                    self.root.after(500, self.make_computer_move)  # Add slight delay for better UX
+                    self.root.after(500, self.make_computer_move)
 
             self.selected_piece = None
             self.draw_board()
             self.update_evaluation_display()
 
     def on_square_click(self, event):
-        """Handle square clicks, modified for single player mode"""
+        """Handle square clicks"""
         try:
             col = event.x // self.cell_size
             row = event.y // self.cell_size
@@ -390,10 +391,9 @@ class ChessGame:
             # First click - Selecting a piece
             if self.selected_piece is None:
                 piece = self.board[row][col]
-                # Can only select pieces of current player's color
                 if piece and piece.color == self.current_player:
                     self.selected_piece = (row, col)
-                    self.draw_board()
+                    self.draw_board()  # This will highlight the selected piece
                 return
 
             # Second click - Moving the piece
@@ -414,26 +414,11 @@ class ChessGame:
 
             # Attempt to move the piece
             if self.is_valid_move(self.selected_piece, (row, col)):
-                # Make the move
-                self.move_piece(self.selected_piece, (row, col))
-
-                # Check for checkmate
-                opposite_color = "black" if self.current_player == "white" else "white"
-                if self.is_checkmate(opposite_color):
-                    self.game_over(self.current_player)
-                else:
-                    # If no checkmate, switch turns
-                    self.current_player = opposite_color
-                    self.turn_label.config(text=f"{self.current_player.capitalize()}'s turn")
-
-                    # If in single player mode and it's computer's turn, make computer move
-                    if self.game_mode == "single_player" and self.current_player != self.player_color:
-                        self.root.after(500, self.make_computer_move)
-
-                # Reset selection
+                self.make_move(self.selected_piece, (row, col))
+            else:
+                # Invalid move, just deselect the piece
                 self.selected_piece = None
                 self.draw_board()
-                self.update_evaluation_display()
 
         except Exception as e:
             print(f"Error in on_square_click: {e}")
@@ -590,9 +575,21 @@ class ChessGame:
             self.update_evaluation_display()
 
     def __del__(self):
-        # Clean up engine when game is closed
-        if hasattr(self, 'engine'):
-            self.engine.close()
+        """Clean up resources when the object is destroyed"""
+        if hasattr(self, 'engine') and self.engine and hasattr(self.engine, 'engine'):
+            try:
+                self.engine.close()
+            except Exception as e:
+                print(f"Warning: Error closing engine: {e}")
+
+    def cleanup(self):
+        """Properly clean up resources before destroying the game"""
+        if hasattr(self, 'engine') and self.engine:
+            try:
+                self.engine.close()
+                self.engine = None
+            except Exception as e:
+                print(f"Warning: Error closing engine: {e}")
 
     def is_draw(self):
         """Check all draw conditions"""
@@ -701,9 +698,11 @@ class ChessGame:
             draw_window.destroy()
             self.reset_game()
 
-        def return_to_main():
-            draw_window.destroy()
-            self.return_to_menu()
+        def return_to_menu(self):
+            """Return to the main menu"""
+            self.cleanup()  # Clean up resources first
+            self.root.destroy()  # Close game window
+            self.main_menu.root.deiconify()  # Show main menu
 
         # Add buttons
         tk.Button(draw_window,
@@ -714,7 +713,7 @@ class ChessGame:
         tk.Button(draw_window,
                   text="Return to Menu",
                   font=("Arial", 12),
-                  command=return_to_main).pack(pady=10)
+                  command=return_to_menu).pack(pady=10)
 
         # Disable the main game window
         self.canvas.unbind('<Button-1>')
@@ -1535,8 +1534,7 @@ class ChessGame:
 
     def return_to_menu(self):
         """Return to the main menu"""
-        if hasattr(self, 'engine'):
-            self.engine.close()  # Clean up engine
+        self.cleanup()  # Clean up resources first
         self.root.destroy()  # Close game window
         self.main_menu.root.deiconify()  # Show main menu
 
@@ -1710,12 +1708,14 @@ class MainMenu:
         self.game_window.configure(bg='#2C3E50')
         self.game_window.resizable(False, False)
 
-        # Create and start the game
-        chess_game = ChessGame(self.game_window, self, game_mode, difficulty)
-
+        # Create and store the game instance
+        self.current_game = ChessGame(self.game_window, self, game_mode, difficulty)
 
     def show_menu(self):
+        """Show the main menu and clean up game resources"""
         if self.game_window:
+            if hasattr(self, 'current_game'):
+                self.current_game.cleanup()
             self.game_window.destroy()
             self.game_window = None
         self.root.deiconify()
